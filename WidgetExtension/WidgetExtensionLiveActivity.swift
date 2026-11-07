@@ -25,32 +25,44 @@ struct WidgetExtensionLiveActivity: Widget {
                 .activityBackgroundTint(Color.black)
                 .activitySystemActionForegroundColor(Color.white)
         } dynamicIsland: { context in
-            DynamicIsland {
+            let status = LaunchStatus(name: context.state.status)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Text(context.attributes.shortName)
-                        .caps(.caption, tracking: 1.5)
-                        .lineLimit(1)
-                        .padding(.leading, 8)
+                    HStack(spacing: 10) {
+                        StarshipMark(color: status.markColor)
+                            .frame(height: 30)
+                        Text(context.attributes.shortName)
+                            .caps(.caption, tracking: 1.5)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.leading, 8)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    StatusText(status: context.state.status)
+                    StatusBadge(status: status)
                         .padding(.trailing, 8)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ActivityClock(state: context.state, font: .title)
-                        StageText(state: context.state)
+                        HStack(alignment: .firstTextBaseline) {
+                            StageText(state: context.state)
+                            Spacer(minLength: 8)
+                            DetailText(state: context.state)
+                        }
+                        PhaseRailView(fills: context.state.phaseFills, isAlert: status.isAlert, showsLabels: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
                 }
             } compactLeading: {
-                StatusText(status: context.state.status)
+                CompactStatus(status: status)
             } compactTrailing: {
                 CompactCountdown(state: context.state)
             } minimal: {
-                StatusText(status: context.state.status)
-                    .minimumScaleFactor(0.5)
+                StarshipMark(color: status.markColor)
+                    .frame(height: 22)
             }
             .widgetURL(URL(string: "starshipwatcher://flight/\(context.attributes.flightID)"))
             .keylineTint(Color.white.opacity(0.55))
@@ -63,19 +75,52 @@ struct LockScreenActivity: View {
     let state: StarshipFlightAttributes.ContentState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(attributes.shortName)
-                    .caps(.footnote, tracking: 2)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                StatusText(status: state.status)
+        let status = LaunchStatus(name: state.status)
+        HStack(alignment: .center, spacing: 18) {
+            StarshipMark(color: status.markColor)
+                .frame(height: 104)
+                .padding(.leading, 4)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center) {
+                    Text(attributes.shortName)
+                        .caps(.footnote, tracking: 2)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    StatusBadge(status: status)
+                }
+                ActivityClock(state: state, font: .largeTitle)
+                HStack(alignment: .firstTextBaseline) {
+                    StageText(state: state)
+                    Spacer(minLength: 8)
+                    DetailText(state: state)
+                }
+                PhaseRailView(fills: state.phaseFills, isAlert: status.isAlert)
+                    .padding(.top, 2)
             }
-            ActivityClock(state: state, font: .largeTitle)
-            StageText(state: state)
         }
-        .padding(20)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background { HorizonBackdrop(rise: 0.12) }
+    }
+}
+
+/// The ship while things are on track; the status word when they aren't, so a hold still shows.
+private struct CompactStatus: View {
+    let status: LaunchStatus
+
+    var body: some View {
+        if status.isHoldOrTBD || status.isAlert {
+            Text(status.shortName)
+                .caps(.caption2, color: status.color, tracking: 1.5)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        } else {
+            StarshipMark(color: status.markColor)
+                .frame(height: 22)
+                .padding(.leading, 2)
+        }
     }
 }
 
@@ -141,17 +186,6 @@ private struct CompactCountdown: View {
     }
 }
 
-private struct StatusText: View {
-    let status: String
-
-    var body: some View {
-        let status = LaunchStatus(name: status)
-        Text(status.shortName)
-            .caps(.caption2, color: status.color, tracking: 1.5)
-            .lineLimit(1)
-    }
-}
-
 private struct StageText: View {
     let state: StarshipFlightAttributes.ContentState
 
@@ -161,6 +195,38 @@ private struct StageText: View {
                 .caps(.caption2, color: Theme.secondary, tracking: 1.5)
                 .lineLimit(1)
         }
+    }
+}
+
+/// "Pad 2", dimmed beside the stage.
+private struct DetailText: View {
+    let state: StarshipFlightAttributes.ContentState
+
+    var body: some View {
+        if !state.detail.isEmpty {
+            Text(state.detail)
+                .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+                .lineLimit(1)
+        }
+    }
+}
+
+extension StarshipFlightAttributes.ContentState {
+    /// The activity only carries the current phase, so earlier phases read full and the current
+    /// one half lit. Booster and ship fly at once after separation, so they light together.
+    fileprivate var phaseFills: [FlightPhase: Double] {
+        let phases = FlightPhase.allCases
+        if LaunchStatus(name: status).isSuccess {
+            return Dictionary(uniqueKeysWithValues: phases.map { ($0, 1.0) })
+        }
+        guard let current = FlightPhase(rawValue: phase), let index = phases.firstIndex(of: current) else {
+            return [:]
+        }
+        let isSplit = current == .booster || current == .ship
+        return Dictionary(uniqueKeysWithValues: phases.enumerated().map { offset, item in
+            let isCurrent = offset == index || (isSplit && (item == .booster || item == .ship))
+            return (item, isCurrent ? 0.5 : offset < index ? 1.0 : 0.0)
+        })
     }
 }
 
@@ -186,16 +252,28 @@ extension StarshipFlightAttributes {
 extension StarshipFlightAttributes.ContentState {
     fileprivate static var countdown: StarshipFlightAttributes.ContentState {
         StarshipFlightAttributes.ContentState(
-            phase: "Countdown",
+            phase: "Preflight",
             status: "Go for launch",
-            targetDate: Calendar.current.date(byAdding: .day, value: 1, to: .now),
-            detail: "Orbital Launch Mount",
+            targetDate: .now.addingTimeInterval(2 * 60 * 60),
+            detail: "Pad 2",
             stage: "Engine chill"
         )
     }
 }
 
 #Preview("Notification", as: .content, using: StarshipFlightAttributes.preview) {
+    WidgetExtensionLiveActivity()
+} contentStates: {
+    StarshipFlightAttributes.ContentState.countdown
+}
+
+#Preview("Expanded", as: .dynamicIsland(.expanded), using: StarshipFlightAttributes.preview) {
+    WidgetExtensionLiveActivity()
+} contentStates: {
+    StarshipFlightAttributes.ContentState.countdown
+}
+
+#Preview("Compact", as: .dynamicIsland(.compact), using: StarshipFlightAttributes.preview) {
     WidgetExtensionLiveActivity()
 } contentStates: {
     StarshipFlightAttributes.ContentState.countdown

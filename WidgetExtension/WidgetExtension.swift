@@ -65,7 +65,14 @@ struct WidgetExtensionEntryView: View {
                 Text("No data").caps(.caption, color: Theme.secondary)
             }
         }
-        .containerBackground(.black, for: .widget)
+        .containerBackground(for: .widget) {
+            switch family {
+            case .systemSmall, .systemMedium, .systemLarge:
+                HorizonBackdrop(rise: family == .systemLarge ? 0.1 : 0.16)
+            default:
+                Color.black
+            }
+        }
     }
 }
 
@@ -74,12 +81,20 @@ struct SmallStarshipWidget: View {
     let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FlightNameText(flight: flight)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
+                    FlightNameText(flight: flight)
+                    StatusBadge(status: flight.status)
+                }
+                Spacer(minLength: 0)
+                StarshipMark(color: flight.status.markColor)
+                    .frame(height: 62)
+                    .padding(.trailing, 4)
+            }
+            Spacer(minLength: 6)
+            ClockLabel(flight: flight, now: now)
             WidgetClock(flight: flight, now: now, font: .title2)
-            Text(flight.status.shortName)
-                .caps(.caption2, color: flight.status.color, tracking: 1.5)
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -91,16 +106,23 @@ struct MediumStarshipWidget: View {
     let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FlightNameText(flight: flight)
-            Spacer(minLength: 0)
-            WidgetClock(flight: flight, now: now, font: .largeTitle)
-            Spacer(minLength: 0)
-            HStack(alignment: .lastTextBaseline, spacing: 12) {
-                StatusPlaceText(flight: flight)
-                Spacer(minLength: 0)
-                StartCountdownButton(flight: flight, now: now)
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
+                FlightNameText(flight: flight)
+                Spacer(minLength: 4)
+                ClockLabel(flight: flight, now: now)
+                WidgetClock(flight: flight, now: now, font: .largeTitle)
+                Spacer(minLength: 4)
+                HStack(alignment: .center, spacing: 8) {
+                    StatusBadge(status: flight.status)
+                    PlaceText(flight: flight)
+                    Spacer(minLength: 0)
+                    StartCountdownButton(flight: flight, now: now)
+                }
             }
+            StarshipMark(color: flight.status.markColor)
+                .frame(height: 118)
+                .padding(.trailing, 6)
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -112,25 +134,57 @@ struct LargeStarshipWidget: View {
     let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            FlightNameText(flight: flight)
-            WidgetClock(flight: flight, now: now, font: .largeTitle)
-            HStack(alignment: .lastTextBaseline, spacing: 12) {
-                StatusPlaceText(flight: flight)
-                Spacer(minLength: 0)
-                StartCountdownButton(flight: flight, now: now)
+        let progress = flight.progress(now: now)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center) {
+                FlightNameText(flight: flight)
+                Spacer(minLength: 8)
+                StatusBadge(status: flight.status)
             }
 
-            Rectangle().fill(Theme.hairline).frame(height: 1)
+            // The old countdown card, with the ship standing beside it.
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ClockLabel(flight: flight, now: now)
+                    WidgetClock(flight: flight, now: now, font: .largeTitle)
+                    if flight.hasFirmDate {
+                        Text(flight.dateText(usesUTC: false))
+                            .caps(.caption2, color: Theme.secondary, tracking: 1.5)
+                            .lineLimit(1)
+                    }
+                }
+                StarshipMark(color: flight.status.markColor)
+                    .frame(height: 96)
+                    .padding(.trailing, 4)
+            }
+            .padding(16)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.white.opacity(0.06))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            }
+
+            PhaseRailView(fills: progress.fills, isAlert: progress.isAlert)
 
             if flight.isInActiveWindow(now: now) {
-                WidgetStage(flight: flight, now: now)
+                WidgetStage(progress: progress)
             } else {
                 Text(flight.summary)
                     .font(.footnote.weight(.light))
                     .foregroundStyle(Theme.secondary)
+                    .lineLimit(3)
             }
+
             Spacer(minLength: 0)
+
+            HStack(alignment: .center, spacing: 12) {
+                PlaceText(flight: flight)
+                Spacer(minLength: 0)
+                StartCountdownButton(flight: flight, now: now)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -139,12 +193,10 @@ struct LargeStarshipWidget: View {
 
 /// Launch hour on the large widget. System-drawn timers aside, a snapshot, so no live remaining time.
 private struct WidgetStage: View {
-    let flight: StarshipFlight
-    let now: Date
+    let progress: MissionProgress
 
     var body: some View {
-        let progress = flight.progress(now: now)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(progress.title)
                 .caps(.footnote, color: progress.isAlert ? Theme.alert : .white)
             ForEach(progress.upcoming) { event in
@@ -165,17 +217,22 @@ struct AccessoryStarshipWidget: View {
     let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(flight.shortName)
-                .font(.caption.weight(.light))
-                .textCase(.uppercase)
-                .tracking(1.5)
-                .lineLimit(1)
-            clockText(for: flight, now: now)
-                .font(.headline.weight(.light).monospacedDigit())
-                .textCase(.uppercase)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+        HStack(spacing: 8) {
+            StarshipMark(glows: false)
+                .frame(height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(flight.shortName)
+                    .font(.caption.weight(.light))
+                    .textCase(.uppercase)
+                    .tracking(1.5)
+                    .lineLimit(1)
+                clockText(for: flight, now: now)
+                    .font(.headline.weight(.light).monospacedDigit())
+                    .textCase(.uppercase)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -190,16 +247,33 @@ private struct FlightNameText: View {
     }
 }
 
-private struct StatusPlaceText: View {
+/// "Liftoff in" above the clock, so a bare number reads as an instrument.
+private struct ClockLabel: View {
+    let flight: StarshipFlight
+    let now: Date
+
+    var body: some View {
+        Text(title)
+            .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+            .lineLimit(1)
+    }
+
+    private var title: String {
+        switch flight.clock(now: now) {
+        case .net: "Target"
+        case .countdown: "Liftoff in"
+        case .awaitingLiftoff: "Countdown"
+        case .elapsed: "Mission time"
+        }
+    }
+}
+
+private struct PlaceText: View {
     let flight: StarshipFlight
 
     var body: some View {
-        let status = Text(flight.status.shortName).foregroundStyle(flight.status.color)
-        let place = Text(" · \(flight.placeText)").foregroundStyle(Theme.secondary)
-        return Text("\(status)\(place)")
-            .font(.caption2)
-            .textCase(.uppercase)
-            .tracking(1.5)
+        Text(flight.placeText)
+            .caps(.caption2, color: Theme.secondary, tracking: 1.5)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
     }
@@ -230,11 +304,11 @@ private struct StartCountdownButton: View {
         if flight.hasFirmDate, let launchDate = flight.launchDate,
            launchDate > now, launchDate.timeIntervalSince(now) <= 8 * 60 * 60 {
             Button(intent: StartLaunchCountdownIntent()) {
-                Text("Pin")
+                Label("Pin", systemImage: "pin")
                     .caps(.caption2, tracking: 2)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .overlay { Rectangle().strokeBorder(.white, lineWidth: 1) }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .overlay { Capsule().strokeBorder(.white, lineWidth: 1) }
             }
             .buttonStyle(.plain)
         }
@@ -289,6 +363,18 @@ extension ConfigurationAppIntent {
     fileprivate static var previewIntent: ConfigurationAppIntent {
         ConfigurationAppIntent()
     }
+}
+
+#Preview(as: .systemSmall) {
+    WidgetExtension()
+} timeline: {
+    StarshipWidgetEntry(date: .now, configuration: .previewIntent, flight: .preview)
+}
+
+#Preview(as: .systemMedium) {
+    WidgetExtension()
+} timeline: {
+    StarshipWidgetEntry(date: .now, configuration: .previewIntent, flight: .preview)
 }
 
 #Preview(as: .systemLarge) {
