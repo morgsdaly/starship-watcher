@@ -58,6 +58,7 @@
 				FlightModels.swift,
 				LaunchLibraryClient.swift,
 				MissionProgress.swift,
+				MockFlight.swift,
 				SharedAppGroup.swift,
 				Theme.swift,
 			);

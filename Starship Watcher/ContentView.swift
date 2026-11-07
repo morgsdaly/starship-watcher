@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 struct ContentView: View {
     @State private var repository = FlightRepository()
@@ -6,6 +7,8 @@ struct ContentView: View {
     @AppStorage("usesUTC") private var usesUTC = false
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("liveActivityEnabled") private var liveActivityEnabled = true
+    @AppStorage("mockFlightEnabled") private var mockFlightEnabled = false
+    @AppStorage("mockFlightMode") private var mockFlightMode = MockFlightMode.liftoff
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -28,7 +31,9 @@ struct ContentView: View {
             SettingsView(
                 usesUTC: $usesUTC,
                 notificationsEnabled: $notificationsEnabled,
-                liveActivityEnabled: $liveActivityEnabled
+                liveActivityEnabled: $liveActivityEnabled,
+                mockFlightEnabled: $mockFlightEnabled,
+                mockFlightMode: $mockFlightMode
             )
             .tabItem {
                 Label("Settings", systemImage: "gearshape")
@@ -52,6 +57,12 @@ struct ContentView: View {
         .onChange(of: notificationsEnabled) { _, _ in
             Task { await NotificationScheduler().sync(flight: repository.nextFlight) }
         }
+        .onChange(of: mockFlightEnabled) { _, _ in
+            applyMockFlight()
+        }
+        .onChange(of: mockFlightMode) { _, _ in
+            applyMockFlight()
+        }
         .onChange(of: scenePhase) { _, phase in
             // Covers opening from the "countdown ready" reminder or a widget tap.
             guard phase == .active, !repository.isLoading else { return }
@@ -69,10 +80,33 @@ struct ContentView: View {
         .task(id: liveActivityMonitorID) {
             await monitorLiveActivityThresholds()
         }
+        .task(id: repository.mockFlight?.launchDate) {
+            await followMockFlight()
+        }
     }
 
     private var liveActivityMonitorID: String {
         "\(repository.nextFlight?.id ?? "none")-\(repository.nextFlight?.launchDate?.timeIntervalSince1970 ?? 0)-\(liveActivityEnabled)"
+    }
+
+    private func applyMockFlight() {
+        if mockFlightEnabled {
+            MockFlight.start(mockFlightMode)
+        } else {
+            MockFlight.stop()
+        }
+        repository.updateMockFlight()
+    }
+
+    /// Steps the mock through each event while the app is open, so status and stage update on time.
+    private func followMockFlight() async {
+        while !Task.isCancelled,
+              let next = repository.mockFlight?.timeline.compactMap(\.targetDate).first(where: { $0 > .now }) {
+            try? await Task.sleep(for: .seconds(next.timeIntervalSinceNow))
+            guard !Task.isCancelled else { return }
+            repository.updateMockFlight()
+            await syncLiveActivity()
+        }
     }
 
     private func syncLiveActivity() async {

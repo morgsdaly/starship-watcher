@@ -9,6 +9,8 @@ final class FlightRepository {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var lastUpdated: Date?
+    /// Takes over as next flight. Kept out of `flights`, so real data and its cache stay untouched.
+    private(set) var mockFlight: StarshipFlight?
 
     private let client: LaunchLibraryClient
 
@@ -18,6 +20,7 @@ final class FlightRepository {
             flights = cached.flights
             lastUpdated = cached.lastUpdated
         }
+        mockFlight = MockFlight.current()
     }
 
     /// True during the very first fetch when no trusted data has ever loaded — used to
@@ -27,7 +30,15 @@ final class FlightRepository {
     }
 
     var nextFlight: StarshipFlight? {
-        flights.nextFlight
+        mockFlight ?? flights.nextFlight
+    }
+
+    /// Picks up a mock starting, stopping or changing status with the clock.
+    func updateMockFlight() {
+        let current = MockFlight.current()
+        guard current != mockFlight else { return }
+        mockFlight = current
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     var pastFlights: [StarshipFlight] {
@@ -40,6 +51,8 @@ final class FlightRepository {
     /// refresh and the start-countdown intent. Skips the network if the last attempt (from any of
     /// those) was within `minInterval`, or while backing off after a 429.
     func refresh(minInterval: TimeInterval = 10 * 60) async {
+        updateMockFlight()
+
         let defaults = UserDefaults.standard
         let now = Date.now
         if let cooldown = defaults.object(forKey: Self.cooldownKey) as? Date, cooldown > now { return }
