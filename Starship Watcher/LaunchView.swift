@@ -287,6 +287,12 @@ private struct HeroPhoto: View {
     let imageURL: URL?
     @State private var image: UIImage?
 
+    init(imageURL: URL?) {
+        self.imageURL = imageURL
+        // Seed from the memory/disk cache so a known photo is there on the first frame.
+        _image = State(initialValue: imageURL.flatMap { BackdropImageLoader.shared.cachedImage(for: $0) })
+    }
+
     var body: some View {
         GeometryReader { proxy in
             if let image {
