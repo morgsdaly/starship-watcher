@@ -194,8 +194,9 @@ private struct StatusPlaceText: View {
     let flight: StarshipFlight
 
     var body: some View {
-        (Text(flight.status.shortName).foregroundStyle(flight.status.color)
-            + Text(" · \(flight.placeText)").foregroundStyle(Theme.secondary))
+        let status = Text(flight.status.shortName).foregroundStyle(flight.status.color)
+        let place = Text(" · \(flight.placeText)").foregroundStyle(Theme.secondary)
+        return Text("\(status)\(place)")
             .font(.caption2)
             .textCase(.uppercase)
             .tracking(1.5)
