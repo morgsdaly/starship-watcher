@@ -1,5 +1,11 @@
 import Foundation
 
+/// A term's plain-English meaning.
+struct Explainer {
+    let title: String
+    let message: String
+}
+
 /// What the main clock shows.
 enum FlightClock: Equatable {
     /// Soft date: never ticks.
@@ -36,6 +42,12 @@ extension StarshipFlight {
     /// Stream link once the launch is close. Launch Library can list one days ahead.
     func liveStreamURL(now: Date = .now) -> URL? {
         isInActiveWindow(now: now) ? webcastURL : nil
+    }
+
+    /// Only soft dates read "NET".
+    var clockExplainer: Explainer? {
+        guard !hasFirmDate, launchDate != nil else { return nil }
+        return Explainer(title: "No Earlier Than", message: "The earliest this flight could launch. The date often moves later.")
     }
 
     /// "NET Nov 13". Placeholder dates are midnight UTC, so local time could show the wrong day.

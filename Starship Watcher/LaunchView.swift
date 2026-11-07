@@ -91,25 +91,30 @@ private struct LaunchHero: View {
             let now = timeline.date
             VStack(alignment: .leading, spacing: 18) {
                 Text(flight.shortName)
-                    .caps(.title3.weight(.light), tracking: 4)
+                    .caps(.title3.weight(.bold), tracking: 4)
 
-                Text(clockText(now: now))
-                    .font(.system(size: clockSize, weight: .light).monospacedDigit())
-                    .textCase(.uppercase)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.4)
+                ExplainerButton(explainer: flight.clockExplainer) {
+                    Text(clockText(now: now))
+                        .font(.system(size: clockSize, weight: .light).monospacedDigit())
+                        .textCase(.uppercase)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 14) {
-                        Text(flight.status.displayName)
-                            .caps(color: flight.status.color)
+                        ExplainerButton(explainer: flight.status.explainer) {
+                            Text(flight.status.displayName)
+                                .caps(color: flight.status.color)
+                        }
                         if flight.isLive(now: now) {
                             Text("● Live").caps(color: Theme.alert)
                         }
                     }
                     Text(flight.hasFirmDate ? "\(flight.dateText(usesUTC: usesUTC)) · \(flight.placeText)" : flight.placeText)
                         .caps(.caption, color: Theme.secondary, tracking: 1.5)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if flight.isInActiveWindow(now: now) {
@@ -135,6 +140,40 @@ private struct LaunchHero: View {
         case .net(let text): text
         case .awaitingLiftoff: "Awaiting liftoff"
         case .countdown(let date), .elapsed(let date): Countdown.text(to: date, now: now)
+        }
+    }
+}
+
+/// Tap for a short explanation of a term. Shows the label alone when there's nothing to explain.
+private struct ExplainerButton<Label: View>: View {
+    let explainer: Explainer?
+    @ViewBuilder let label: Label
+
+    @State private var isShowing = false
+
+    var body: some View {
+        if let explainer {
+            Button { isShowing = true } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityHint("Explains this term")
+                .popover(isPresented: $isShowing) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(explainer.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Text(explainer.message)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 260, alignment: .leading)
+                    .padding(16)
+                    // Solid, so the photo and hero text can't show through.
+                    .presentationBackground(.black)
+                    .presentationCompactAdaptation(.popover)
+                }
+        } else {
+            label
         }
     }
 }
