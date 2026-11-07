@@ -24,6 +24,22 @@ extension View {
 }
 
 extension LaunchStatus {
+    /// Pre-launch statuses only. The rest speak for themselves.
+    var explainer: Explainer? {
+        let value = name.lowercased()
+        return if isTBD {
+            Explainer(title: "To Be Determined", message: "No launch date is set yet. The date shown is a placeholder.")
+        } else if value.contains("confirmed") || value.contains("tbc") {
+            Explainer(title: "To Be Confirmed", message: "There's a target date, but it isn't official yet.")
+        } else if isHold {
+            Explainer(title: "On Hold", message: "The countdown is paused. A new time depends on what caused the hold.")
+        } else if isGo {
+            Explainer(title: "Go for Launch", message: "The launch time is confirmed.")
+        } else {
+            nil
+        }
+    }
+
     var displayName: String {
         switch name.lowercased() {
         case "go": "Go for launch"
