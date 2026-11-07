@@ -16,6 +16,11 @@ enum FlightCache {
         return try? JSONDecoder.starship.decode(CachedFlights.self, from: data)
     }
 
+    /// The widget's flight: a running mock, else the next cached flight.
+    static var nextFlight: StarshipFlight? {
+        MockFlight.current() ?? load()?.flights.nextFlight
+    }
+
     static func save(_ flights: [StarshipFlight]) throws {
         let cached = CachedFlights(lastUpdated: .now, flights: flights)
         let data = try JSONEncoder.starship.encode(cached)

@@ -78,8 +78,9 @@ struct StarshipActivityController {
         }
 
         await endAll()
+        // A mock starts right away: the T-8h mode is outside the automatic lead window.
         guard canStart, Self.isEnabled, flight.hasFirmDate, let launchDate = flight.launchDate,
-              Date.now >= Self.windowStart(for: launchDate) else { return }
+              flight.isMock || Date.now >= Self.windowStart(for: launchDate) else { return }
         try? request(for: flight)
     }
 

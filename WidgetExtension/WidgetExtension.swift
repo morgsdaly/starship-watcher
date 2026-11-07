@@ -8,13 +8,13 @@ struct Provider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: ConfigurationAppIntent, in context: Context) async -> StarshipWidgetEntry {
-        StarshipWidgetEntry(date: .now, configuration: configuration, flight: FlightCache.load()?.flights.nextFlight ?? .preview)
+        StarshipWidgetEntry(date: .now, configuration: configuration, flight: FlightCache.nextFlight ?? .preview)
     }
 
     func timeline(for configuration: ConfigurationAppIntent, in context: Context) async -> Timeline<StarshipWidgetEntry> {
         // The app keeps the shared cache fresh (and reloads widgets when it does), so the widget
         // only hits the network itself before the app has ever loaded data.
-        var flight = FlightCache.load()?.flights.nextFlight
+        var flight = FlightCache.nextFlight
         if flight == nil {
             flight = (try? await LaunchLibraryClient().fetchStarshipFlights(includePrevious: false))?.nextFlight
         }
