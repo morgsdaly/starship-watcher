@@ -18,6 +18,13 @@ actor BackdropImageLoader {
 
     private static let diskDirectory = URL.cachesDirectory.appending(path: "Backdrops", directoryHint: .isDirectory)
     private static let diskLifetime: TimeInterval = 30 * 24 * 60 * 60
+    private static let lastShownKey = "lastBackdropURL"
+
+    /// The most recent backdrop shown, kept for flights that have no photo of their own.
+    nonisolated static var lastShownURL: URL? {
+        get { UserDefaults.standard.url(forKey: lastShownKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lastShownKey) }
+    }
 
     /// Memory, then disk. Synchronous so views can show the image on their first frame.
     nonisolated func cachedImage(for url: URL) -> UIImage? {

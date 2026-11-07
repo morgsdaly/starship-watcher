@@ -282,7 +282,8 @@ private struct SequenceRow: View {
     }
 }
 
-/// Fixed flight photo, darkened for the hero text. Plain black when there is no image.
+/// Fixed flight photo, darkened for the hero text. A flight without a photo keeps the last one
+/// shown; plain black only when there has never been one.
 private struct HeroPhoto: View {
     let imageURL: URL?
     @State private var image: UIImage?
@@ -290,7 +291,8 @@ private struct HeroPhoto: View {
     init(imageURL: URL?) {
         self.imageURL = imageURL
         // Seed from the memory/disk cache so a known photo is there on the first frame.
-        _image = State(initialValue: imageURL.flatMap { BackdropImageLoader.shared.cachedImage(for: $0) })
+        let url = imageURL ?? BackdropImageLoader.lastShownURL
+        _image = State(initialValue: url.flatMap { BackdropImageLoader.shared.cachedImage(for: $0) })
     }
 
     var body: some View {
@@ -317,15 +319,16 @@ private struct HeroPhoto: View {
         }
         .accessibilityHidden(true)
         .task(id: imageURL) {
-            guard let imageURL else {
-                image = nil
-                return
-            }
-            if let cached = BackdropImageLoader.shared.cachedImage(for: imageURL) {
+            // No photo for this flight: keep the last one shown.
+            guard let url = imageURL ?? BackdropImageLoader.lastShownURL else { return }
+            if let cached = BackdropImageLoader.shared.cachedImage(for: url) {
                 image = cached
+                BackdropImageLoader.lastShownURL = url
                 return
             }
-            let loaded = await BackdropImageLoader.shared.image(for: imageURL)
+            // A failed download also keeps the current photo rather than going black.
+            guard let loaded = await BackdropImageLoader.shared.image(for: url) else { return }
+            BackdropImageLoader.lastShownURL = url
             withAnimation(.easeOut(duration: 0.4)) { image = loaded }
         }
     }
