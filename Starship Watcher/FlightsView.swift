@@ -78,7 +78,7 @@ private struct FlightRow: View {
                     .caps(.caption2, color: Theme.secondary, tracking: 1)
             }
             Spacer(minLength: 0)
-            Text(flight.status.name)
+            Text(flight.status.shortName)
                 .caps(.caption2, color: flight.status.isAlert ? Theme.alert : Theme.secondary, tracking: 1)
         }
         .padding(.vertical, 14)
@@ -114,6 +114,8 @@ private struct FlightDetailView: View {
                     .font(.body.weight(.light))
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
+
+                FlightFacts(flight: flight, usesUTC: usesUTC)
             }
             .padding(Theme.gutter)
             .frame(maxWidth: .infinity, alignment: .leading)
