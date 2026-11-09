@@ -16,10 +16,19 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     let imageURL: URL?
     let webcastLive: Bool
     let sourceURL: URL?
-    /// Best stream from Launch Library. Upcoming flights only; nil until a stream is listed.
+    /// Best stream from Launch Library. Nil until a stream is listed.
     var webcastURL: URL? = nil
     /// False when Launch Library marks the date or time as a placeholder. Nil means unknown.
     var hasExactTime: Bool? = nil
+    /// Launch Library's sequence for this flight. Nil until one is listed.
+    var publishedMilestones: [FlightMilestone]? = nil
+    /// How far to trust `launchDate`, as Launch Library's abbreviation: "MIN", "M", "Q2", "Y".
+    var netPrecision: String? = nil
+    /// Booster, then ship. Empty until assigned.
+    var vehicles: [FlightVehicle]? = nil
+    /// Editors' notes on this flight, newest first.
+    var updates: [FlightUpdate]? = nil
+    var failureReason: String? = nil
 
     var isUpcoming: Bool {
         guard let launchDate else { return true }
@@ -31,14 +40,26 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     var hasFirmDate: Bool {
         guard launchDate != nil else { return false }
         if status.isGo || status.confirmsLiftoff { return true }
-        return !status.isTBD && hasExactTime != false
+        return !status.isTBD && !status.isTBC && hasExactTime != false
     }
 
+    var hasPublishedTimeline: Bool {
+        publishedMilestones != nil
+    }
+
+    /// The published sequence when there is one, else the template. Published sequences start at
+    /// propellant load, so the template's earlier watch markers stay in front.
     var timeline: [FlightEvent] {
-        guard let launchDate else {
-            return FlightEvent.standardTemplate(relativeTo: nil)
+        let template = FlightEvent.standardTemplate(relativeTo: launchDate)
+        guard let milestones = publishedMilestones, let first = milestones.first else { return template }
+        return template.filter { $0.offset < first.offset } + milestones.map { milestone in
+            FlightEvent(
+                title: milestone.title,
+                targetDate: launchDate?.addingTimeInterval(milestone.offset),
+                offset: milestone.offset,
+                phase: milestone.phase
+            )
         }
-        return FlightEvent.standardTemplate(relativeTo: launchDate)
     }
 
     /// Liftoff confirmed by status, or webcast live past NET while still Go. Holds and TBD never count,
@@ -92,14 +113,20 @@ struct LaunchStatus: Codable, Hashable {
         return value.contains("determined") || value.contains("tbd")
     }
 
+    /// Launch Library: "To Be Confirmed". A target date, but not an official one.
+    var isTBC: Bool {
+        let value = name.lowercased()
+        return value.contains("to be confirmed") || value == "tbc"
+    }
+
     /// Launch Library: "On Hold".
     var isHold: Bool {
         name.lowercased().contains("hold")
     }
 
-    /// Launch Library: "On Hold", "To Be Determined".
+    /// Launch Library: "On Hold", "To Be Determined", "To Be Confirmed".
     var isHoldOrTBD: Bool {
-        isTBD || isHold
+        isTBD || isTBC || isHold
     }
 
     /// Launch Library: "Launch Successful". "Payload Deployed" also means it worked.
@@ -113,6 +140,29 @@ struct LaunchStatus: Codable, Hashable {
         let value = name.lowercased()
         return value.contains("fail") || value.contains("scrub") || value.contains("abort")
     }
+}
+
+struct FlightVehicle: Codable, Hashable {
+    /// "Booster 22", "Ship 42".
+    let name: String
+    /// This vehicle's nth flight. Boosters only.
+    let flightNumber: Int?
+    let details: String?
+    let landingSummary: String?
+    /// Nil until a landing attempt has an outcome.
+    let landingSucceeded: Bool?
+}
+
+struct FlightUpdate: Codable, Hashable {
+    let date: Date
+    let text: String
+}
+
+struct FlightMilestone: Codable, Hashable {
+    let title: String
+    /// Seconds from liftoff.
+    let offset: TimeInterval
+    let phase: FlightPhase
 }
 
 struct FlightEvent: Identifiable, Codable, Hashable {

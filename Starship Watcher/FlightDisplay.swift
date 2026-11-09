@@ -50,14 +50,31 @@ extension StarshipFlight {
         return Explainer(title: "No Earlier Than", message: "The earliest this flight could launch. The date often moves later.")
     }
 
-    /// "NET Nov 13". Placeholder dates are midnight UTC, so local time could show the wrong day.
+    /// "NET Nov 13", or only as much as Launch Library knows: "NET Jun 2027", "NET Q2 2027", "NET 2028".
+    /// Placeholder dates are midnight UTC, so local time could show the wrong day.
     var netText: String {
         guard let launchDate else { return "Date TBD" }
-        var style = Date.FormatStyle(timeZone: .gmt).month(.abbreviated).day()
-        if !Calendar.current.isDate(launchDate, equalTo: .now, toGranularity: .year) {
-            style = style.year()
+        let utc = Date.FormatStyle(timeZone: .gmt)
+        let year = launchDate.formatted(utc.year())
+        switch netPrecision {
+        case "Q1", "Q2", "Q3", "Q4", "H1", "H2":
+            return "NET \(netPrecision ?? "") \(year)"
+        case "Y":
+            return "NET \(year)"
+        case "FY":
+            return "NET FY\(year)"
+        case "DEC":
+            return "NET \(year.dropLast())0s"
+        default:
+            var style = utc.month(.abbreviated)
+            if netPrecision != "M" {
+                style = style.day()
+            }
+            if !Calendar.current.isDate(launchDate, equalTo: .now, toGranularity: .year) {
+                style = style.year()
+            }
+            return "NET \(launchDate.formatted(style))"
         }
-        return "NET \(launchDate.formatted(style))"
     }
 
     /// Firm flights get date and time, the rest a NET date.
@@ -88,6 +105,16 @@ extension Date {
         var style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current).month(.abbreviated).day().hour().minute()
         if year { style = style.year() }
         return formatted(style) + (usesUTC ? " UTC" : "")
+    }
+}
+
+extension FlightVehicle {
+    /// "First flight", "Flight 2 · Landing failed". Nil when there's nothing to say.
+    var statusText: String? {
+        let flight = flightNumber.map { $0 == 1 ? "First flight" : "Flight \($0)" }
+        let landing = landingSucceeded.map { $0 ? "Landing success" : "Landing failed" }
+        let parts = [flight, landing].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

@@ -42,9 +42,9 @@ extension LaunchStatus {
 
     var displayName: String {
         switch name.lowercased() {
-        case "go": "Go for launch"
-        case "tbd": "To be determined"
-        case "tbc": "To be confirmed"
+        case "go", "go for launch": "Go for launch"
+        case "tbd", "to be determined": "To be determined"
+        case "tbc", "to be confirmed": "To be confirmed"
         default: name
         }
     }
@@ -53,6 +53,7 @@ extension LaunchStatus {
     var shortName: String {
         let value = name.lowercased()
         if isSuccess { return "Success" }
+        if value.contains("partial") { return "Partial failure" }
         if isAlert { return value.contains("scrub") ? "Scrub" : "Failure" }
         if isHold { return "Hold" }
         if isTBD { return "TBD" }

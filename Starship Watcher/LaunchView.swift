@@ -50,7 +50,7 @@ struct LaunchView: View {
                         LaunchHero(flight: flight, usesUTC: usesUTC)
                     }
 
-                    LaunchDetails(flight: flight, repository: repository)
+                    LaunchDetails(flight: flight, repository: repository, usesUTC: usesUTC)
                 }
             }
             .scrollIndicators(.hidden)
@@ -181,6 +181,7 @@ private struct ExplainerButton<Label: View>: View {
 private struct LaunchDetails: View {
     let flight: StarshipFlight
     let repository: FlightRepository
+    let usesUTC: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -196,6 +197,8 @@ private struct LaunchDetails: View {
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                FlightFacts(flight: flight, usesUTC: usesUTC)
 
                 SequenceList(flight: flight)
 
@@ -219,7 +222,7 @@ private struct LaunchDetails: View {
     }
 }
 
-/// Template offsets from recent flights, not live data, hence "Typical timeline".
+/// Planned offsets, never live data: the flight's published sequence or, without one, a template.
 /// The tracker sits here until launch nears, then moves up into the hero.
 private struct SequenceList: View {
     let flight: StarshipFlight
@@ -238,7 +241,8 @@ private struct SequenceList: View {
                     HStack {
                         Text("Sequence").caps(color: Theme.secondary)
                         Spacer()
-                        Text("Typical timeline").caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+                        Text(flight.hasPublishedTimeline ? "Planned timeline" : "Typical timeline")
+                            .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
                     }
 
                     VStack(spacing: 0) {

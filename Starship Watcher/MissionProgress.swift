@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where a flight is against the typical timeline. Worked out from the clock and Launch Library
+/// Where a flight is against its planned timeline. Worked out from the clock and Launch Library
 /// status, never telemetry, so screens label it an estimate.
 struct MissionProgress: Equatable {
     /// "Hot staging", "Awaiting liftoff", "Launch Failure".
