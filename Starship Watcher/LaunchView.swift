@@ -30,10 +30,6 @@ struct LaunchView: View {
                 }
             }
             .refreshingToolbar(isLoading: repository.isLoading)
-            .sensoryFeedback(.success, trigger: repository.lastUpdated)
-            .task(id: flight?.id) {
-                await refreshDuringActiveWindow()
-            }
         }
     }
 
@@ -47,7 +43,7 @@ struct LaunchView: View {
                     // At least a full screen, and taller when large text needs it.
                     ZStack(alignment: .bottomLeading) {
                         Color.clear.containerRelativeFrame(.vertical)
-                        LaunchHero(flight: flight, usesUTC: usesUTC)
+                        LaunchHero(flight: flight, repository: repository, usesUTC: usesUTC)
                     }
 
                     LaunchDetails(flight: flight, repository: repository, usesUTC: usesUTC)
@@ -64,30 +60,19 @@ struct LaunchView: View {
         }
     }
 
-    private func refreshDuringActiveWindow() async {
-        while !Task.isCancelled, flight?.isInActiveWindow() ?? false {
-            // Every 6 min keeps this under Launch Library's ~15 requests/hour.
-            try? await Task.sleep(for: .seconds(6 * 60))
-            if !Task.isCancelled {
-                await repository.refresh(minInterval: 5 * 60)
-                // Push the current stage even when Launch Library data didn't change.
-                #if canImport(ActivityKit)
-                await StarshipActivityController().sync(flight: repository.nextFlight, canStart: false)
-                #endif
-            }
-        }
-    }
 }
 
 private struct LaunchHero: View {
     let flight: StarshipFlight
+    let repository: FlightRepository
     let usesUTC: Bool
 
     @Environment(\.openURL) private var openURL
     @ScaledMetric(relativeTo: .largeTitle) private var clockSize: CGFloat = 46
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        // Ticks land on whole seconds of the countdown, in step with the webcast clock.
+        TimelineView(.periodic(from: Countdown.tickAnchor(for: flight.launchDate), by: 1)) { timeline in
             let now = timeline.date
             VStack(alignment: .leading, spacing: 18) {
                 Text(flight.shortName)
@@ -122,6 +107,8 @@ private struct LaunchHero: View {
                         .padding(.top, 6)
                 }
 
+                LiftoffMark(flight: flight, repository: repository, now: now)
+
                 if let streamURL = flight.liveStreamURL(now: now) {
                     Button("Watch Live") { openURL(streamURL) }
                         .buttonStyle(OutlineButtonStyle())
@@ -140,6 +127,35 @@ private struct LaunchHero: View {
         case .net(let text): text
         case .awaitingLiftoff: "Awaiting liftoff"
         case .countdown(let date), .elapsed(let date): Countdown.text(to: date, now: now)
+        }
+    }
+}
+
+/// The viewer's own liftoff call. Launch Library's status can trail the pad by minutes, and the
+/// app never assumes liftoff from the clock, so this is the fastest way to start the mission timer.
+private struct LiftoffMark: View {
+    let flight: StarshipFlight
+    let repository: FlightRepository
+    let now: Date
+
+    var body: some View {
+        if flight.canMarkLiftoff(now: now) {
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Mark liftoff") { repository.markLiftoff() }
+                    .buttonStyle(OutlineButtonStyle())
+                Text("Tap as it leaves the pad to start the mission clock.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
+            }
+            .padding(.top, 6)
+        } else if flight.hasManualLiftoff {
+            Button { repository.clearLiftoffMark() } label: {
+                Text("Liftoff marked by you · Undo")
+                    .caps(.caption2, color: Theme.secondary, tracking: 1.5)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -228,7 +244,7 @@ private struct SequenceList: View {
     let flight: StarshipFlight
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        TimelineView(.periodic(from: Countdown.tickAnchor(for: flight.launchDate), by: 1)) { timeline in
             let events = flight.timeline
             // A placeholder date passing proves nothing, so soft dates mark no progress.
             let current = flight.hasFirmDate ? flight.currentEventIndex(in: events, now: timeline.date) : nil

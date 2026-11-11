@@ -57,6 +57,7 @@
 				FlightDisplay.swift,
 				FlightModels.swift,
 				LaunchLibraryClient.swift,
+				ManualLiftoff.swift,
 				MissionProgress.swift,
 				MockFlight.swift,
 				SharedAppGroup.swift,

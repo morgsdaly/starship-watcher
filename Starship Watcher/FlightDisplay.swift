@@ -35,6 +35,33 @@ extension StarshipFlight {
         return now >= launchDate.addingTimeInterval(-3 * 60 * 60) && now <= launchDate.addingTimeInterval(2 * 60 * 60)
     }
 
+    /// How often to ask Launch Library while the app is open. Nil outside the active window.
+    /// The free tier allows ~15 requests/hour, so the budget goes where a minute matters:
+    /// every 60s from T-2m until liftoff is confirmed (or T+6m), sparse in the hour either side.
+    func pollInterval(now: Date = .now) -> TimeInterval? {
+        guard isInActiveWindow(now: now), let launchDate else { return nil }
+        if status.isFinal { return 15 * 60 }
+        if status.confirmsLiftoff { return 5 * 60 }
+        let sinceNET = now.timeIntervalSince(launchDate)
+        if sinceNET >= -Self.burstLead, sinceNET <= 6 * 60 { return 60 }
+        return abs(sinceNET) <= 60 * 60 ? 12 * 60 : 6 * 60
+    }
+
+    /// Seconds to wait before the next poll: the interval, cut short so the burst starts on time.
+    func nextPollDelay(now: Date = .now) -> TimeInterval? {
+        guard let interval = pollInterval(now: now), let launchDate else { return nil }
+        let untilBurst = launchDate.addingTimeInterval(-Self.burstLead).timeIntervalSince(now)
+        return untilBurst > 0 ? min(interval, untilBurst) : interval
+    }
+
+    private static let burstLead: TimeInterval = 2 * 60
+
+    /// The viewer can call liftoff from a minute before NET until the status catches up.
+    func canMarkLiftoff(now: Date = .now) -> Bool {
+        guard hasFirmDate, !isMock, !status.confirmsLiftoff, let launchDate else { return false }
+        return now >= launchDate.addingTimeInterval(-60) && isInActiveWindow(now: now)
+    }
+
     func isLive(now: Date = .now) -> Bool {
         webcastLive && isInActiveWindow(now: now)
     }

@@ -63,13 +63,12 @@ struct ContentView: View {
         .onChange(of: mockFlightMode) { _, _ in
             applyMockFlight()
         }
-        .onChange(of: scenePhase) { _, phase in
-            // Covers opening from the "countdown ready" reminder or a widget tap.
-            guard phase == .active, !repository.isLoading else { return }
-            Task {
-                await repository.refresh(minInterval: 15 * 60)
-                await syncLiveActivity()
-            }
+        .task(id: scenePhase) {
+            // Restarts on every return to the foreground, which also covers opening from the
+            // "countdown ready" reminder, a widget tap, or a liftoff marked on the Lock Screen.
+            guard scenePhase == .active else { return }
+            repository.liftoffMarksChanged()
+            await pollLaunchLibrary()
         }
         .onChange(of: repository.nextFlight) { _, _ in
             Task {
@@ -87,6 +86,21 @@ struct ContentView: View {
 
     private var liveActivityMonitorID: String {
         "\(repository.nextFlight?.id ?? "none")-\(repository.nextFlight?.launchDate?.timeIntervalSince1970 ?? 0)-\(liveActivityEnabled)"
+    }
+
+    /// Runs for as long as the app is in the foreground, whichever tab is showing. Refreshes on
+    /// the flight's own schedule near launch (`pollInterval`), and lazily the rest of the time.
+    private func pollLaunchLibrary() async {
+        while !Task.isCancelled {
+            let flight = repository.nextFlight
+            let interval = flight?.pollInterval()
+            await repository.refresh(minInterval: interval.map { $0 - 10 } ?? 30 * 60)
+            guard !Task.isCancelled else { return }
+            // Push the current stage even when Launch Library data didn't change.
+            await syncLiveActivity()
+            // Outside the window, look again soon: it opens at T-3h without the flight changing.
+            try? await Task.sleep(for: .seconds(repository.nextFlight?.nextPollDelay() ?? 5 * 60))
+        }
     }
 
     private func applyMockFlight() {

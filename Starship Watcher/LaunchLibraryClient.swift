@@ -166,13 +166,21 @@ private extension Array where Element == LaunchLibraryTimelineEvent {
 
         let milestones = parsed.map { title, offset -> FlightMilestone in
             let name = title.lowercased()
+            let mentions = { (words: [String]) in words.contains { name.contains($0) } }
             let phase: FlightPhase
             if offset < 0 {
                 phase = .preflight
-            } else if name.contains("booster") || name.contains("stage 1") {
+            } else if offset <= staging, !mentions(["boostback"]) {
+                phase = .ascent
+            } else if mentions(["booster", "super heavy", "stage 1", "first stage", "boostback", "jettison"]) {
                 phase = .booster
+            } else if mentions(["ship", "stage 2", "second stage", "seco", "payload", "entry"]) {
+                phase = .ship
+            } else if mentions(["landing", "catch"]) {
+                // Unnamed landings: the booster is down within about five minutes of staging.
+                phase = offset <= staging + 6 * 60 ? .booster : .ship
             } else {
-                phase = offset <= staging ? .ascent : .ship
+                phase = .ship
             }
             return FlightMilestone(title: title, offset: offset, phase: phase)
         }
