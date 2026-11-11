@@ -6,6 +6,19 @@
 	<array>
 		<string>com.morgandaly.Starship-Watcher.refresh</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.morgandaly.Starship-Watcher</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>starshipwatcher</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

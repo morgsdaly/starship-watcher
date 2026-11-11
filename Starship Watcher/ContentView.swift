@@ -10,23 +10,27 @@ struct ContentView: View {
     @AppStorage("mockFlightEnabled") private var mockFlightEnabled = false
     @AppStorage("mockFlightMode") private var mockFlightMode = MockFlightMode.liftoff
     @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedTab = AppTab.launch
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             LaunchView(repository: repository, usesUTC: usesUTC)
                 .tabItem {
                     Label("Launch", systemImage: "timer")
                 }
+                .tag(AppTab.launch)
 
             FlightsView(repository: repository, usesUTC: usesUTC)
                 .tabItem {
                     Label("Flights", systemImage: "list.bullet")
                 }
+                .tag(AppTab.flights)
 
             NewsView(repository: newsRepository)
                 .tabItem {
                     Label("News", systemImage: "newspaper")
                 }
+                .tag(AppTab.news)
 
             SettingsView(
                 usesUTC: $usesUTC,
@@ -38,8 +42,13 @@ struct ContentView: View {
             .tabItem {
                 Label("Settings", systemImage: "gearshape")
             }
+            .tag(AppTab.settings)
         }
         .tint(.white)
+        // starshipwatcher://flight/<id> from the Live Activity: the countdown lives on Launch.
+        .onOpenURL { url in
+            if url.scheme == "starshipwatcher" { selectedTab = .launch }
+        }
         .task {
             await repository.refresh()
             await syncLiveActivity()
@@ -49,7 +58,7 @@ struct ContentView: View {
         .onChange(of: liveActivityEnabled) { _, enabled in
             Task {
                 #if canImport(ActivityKit)
-                if !enabled { await StarshipActivityController().endAll() }
+                if !enabled { await StarshipActivityController().endAll(includingEnded: true) }
                 #endif
                 await syncLiveActivity()
             }
@@ -139,6 +148,10 @@ struct ContentView: View {
         await syncLiveActivity()
         #endif
     }
+}
+
+private enum AppTab {
+    case launch, flights, news, settings
 }
 
 #Preview {
