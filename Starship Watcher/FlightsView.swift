@@ -76,6 +76,10 @@ private struct FlightRow: View {
                     .multilineTextAlignment(.leading)
                 Text(flight.dateText(usesUTC: usesUTC, year: showsYear))
                     .caps(.caption2, color: Theme.secondary, tracking: 1)
+                if let vehicles = flight.vehicles, !vehicles.isEmpty {
+                    Text(vehicles.map(\.name).joined(separator: " · "))
+                        .caps(.caption2, color: Theme.tertiary, tracking: 1)
+                }
             }
             Spacer(minLength: 0)
             Text(flight.status.shortName)
@@ -92,6 +96,8 @@ private struct FlightRow: View {
 private struct FlightDetailView: View {
     let flight: StarshipFlight
     let usesUTC: Bool
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
@@ -114,6 +120,11 @@ private struct FlightDetailView: View {
                     .font(.body.weight(.light))
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if let webcastURL = flight.webcastURL {
+                    Button(flight.isUpcoming ? "Webcast" : "Watch replay") { openURL(webcastURL) }
+                        .buttonStyle(OutlineButtonStyle())
+                }
 
                 FlightFacts(flight: flight, usesUTC: usesUTC)
             }

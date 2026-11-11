@@ -14,12 +14,18 @@ struct SettingsView: View {
                     Toggle("Use UTC", isOn: $usesUTC)
                     Toggle("Launch reminders", isOn: $notificationsEnabled)
                     Toggle("Live Activity", isOn: $liveActivityEnabled)
+                    if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        Link("Permissions in iOS Settings", destination: settingsURL)
+                            .foregroundStyle(.white)
+                    }
+                } footer: {
+                    Text("The Live Activity pins the countdown to your Lock Screen from three hours before liftoff. Reminders also cover new dates, holds and results.")
                 }
                 .listRowBackground(Color.black)
                 .listRowSeparatorTint(Theme.hairline)
 
                 Section {
-                    Toggle("Mock flight", isOn: $mockFlightEnabled)
+                    Toggle("Preview a launch", isOn: $mockFlightEnabled)
                     if mockFlightEnabled {
                         Picker("Start from", selection: $mockFlightMode) {
                             ForEach(MockFlightMode.allCases) { mode in
@@ -28,15 +34,26 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("Replaces the next flight with a test flight in real time. Turn off and on to restart.")
+                    Text("Runs a practice flight in real time, so you can see the countdown, stages and Live Activity before launch day. Turn off and on to restart.")
                 }
                 .listRowBackground(Color.black)
                 .listRowSeparatorTint(Theme.hairline)
 
                 Section {
+                    if let url = URL(string: "https://thespacedevs.com") {
+                        Link("Launch data: The Space Devs", destination: url)
+                            .foregroundStyle(.white)
+                    }
+                    if let url = URL(string: "https://spaceflightnewsapi.net") {
+                        Link("News: Spaceflight News API", destination: url)
+                            .foregroundStyle(.white)
+                    }
                     LabeledContent("Version", value: appVersion)
+                } footer: {
+                    Text("Times after liftoff follow the planned timeline, not live telemetry.")
                 }
                 .listRowBackground(Color.black)
+                .listRowSeparatorTint(Theme.hairline)
             }
             .font(.subheadline.weight(.light))
             // Clears the tab bar's white tint, which would otherwise colour the controls.

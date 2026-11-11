@@ -94,7 +94,9 @@ private extension StarshipFlight {
         self.imageURL = response.image?.imageURL
         self.webcastLive = response.webcastLive ?? false
         self.sourceURL = response.url
-        self.webcastURL = response.vidURLs?.min { ($0.priority ?? .max) < ($1.priority ?? .max) }?.url
+        let videos = (response.vidURLs ?? []).sorted { ($0.priority ?? .max) < ($1.priority ?? .max) }
+        self.webcastURL = videos.first?.url
+        self.streams = videos.map { FlightStream(name: $0.publisher?.nilIfEmpty ?? $0.url.host() ?? "Stream", url: $0.url) }
         self.netPrecision = response.netPrecision?.abbrev
         self.hasExactTime = response.netPrecision?.abbrev.map { ["SEC", "MIN"].contains($0) }
         self.publishedMilestones = response.timeline?.milestones
@@ -275,6 +277,19 @@ private struct LaunchLibraryTimelineEventType: Decodable {
 private struct LaunchLibraryVideo: Decodable {
     let url: URL
     let priority: Int?
+    let publisher: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url, priority, publisher
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decode(URL.self, forKey: .url)
+        priority = try container.decodeIfPresent(Int.self, forKey: .priority)
+        // Lenient: a publisher in an unexpected shape must not fail the whole launch list.
+        publisher = (try? container.decodeIfPresent(String.self, forKey: .publisher)) ?? nil
+    }
 }
 
 private struct LaunchLibraryStatus: Decodable {

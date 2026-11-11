@@ -45,6 +45,14 @@ struct LaunchView: View {
                         Color.clear.containerRelativeFrame(.vertical)
                         LaunchHero(flight: flight, repository: repository, usesUTC: usesUTC)
                     }
+                    // The hero fills the screen, so say there is more below it.
+                    .overlay(alignment: .bottom) {
+                        Image(systemName: "chevron.compact.down")
+                            .font(.title3)
+                            .foregroundStyle(Theme.tertiary)
+                            .padding(.bottom, 4)
+                            .accessibilityHidden(true)
+                    }
 
                     LaunchDetails(flight: flight, repository: repository, usesUTC: usesUTC)
                 }
@@ -85,6 +93,9 @@ private struct LaunchHero: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.4)
+                        // Digits roll rather than snap: down before liftoff, up after.
+                        .contentTransition(.numericText(countsDown: !flight.hasLiftedOff(now: now)))
+                        .animation(.snappy(duration: 0.3), value: clockText(now: now))
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -100,25 +111,52 @@ private struct LaunchHero: View {
                     Text(flight.hasFirmDate ? "\(flight.dateText(usesUTC: usesUTC)) · \(flight.placeText)" : flight.placeText)
                         .caps(.caption, color: Theme.secondary, tracking: 1.5)
                         .fixedSize(horizontal: false, vertical: true)
+                    if let windowText = flight.windowText(now: now, usesUTC: usesUTC) {
+                        Text(windowText)
+                            .caps(.caption, color: Theme.secondary, tracking: 1.5)
+                            .monospacedDigit()
+                    }
+                    // Up here, not at the foot of the page: stale data changes how to read the clock.
+                    if let errorMessage = repository.errorMessage {
+                        NoticeText(message: errorMessage)
+                    }
                 }
 
                 if flight.isInActiveWindow(now: now) {
-                    StageTracker(flight: flight, now: now)
+                    StageTracker(flight: flight, now: now, checked: flight.isMock ? nil : repository.lastUpdated)
                         .padding(.top, 6)
                 }
 
                 LiftoffMark(flight: flight, repository: repository, now: now)
 
                 if let streamURL = flight.liveStreamURL(now: now) {
-                    Button("Watch Live") { openURL(streamURL) }
-                        .buttonStyle(OutlineButtonStyle())
-                        .padding(.top, 6)
+                    HStack(spacing: 20) {
+                        Button("Watch Live") { openURL(streamURL) }
+                            .buttonStyle(OutlineButtonStyle())
+                        let others = flight.otherStreams(now: now)
+                        if !others.isEmpty {
+                            Menu {
+                                ForEach(others, id: \.self) { stream in
+                                    Button(stream.name) { openURL(stream.url) }
+                                }
+                            } label: {
+                                Text("Other streams").caps(.caption, color: Theme.secondary, tracking: 1.5)
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
                 }
+            }
+            .onChange(of: flight.keepsScreenAwake(now: now), initial: true) { _, keepsAwake in
+                UIApplication.shared.isIdleTimerDisabled = keepsAwake
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.gutter)
         .padding(.bottom, 28)
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        // The moment itself, whether Launch Library or the viewer called it.
+        .sensoryFeedback(.success, trigger: flight.status.confirmsLiftoff)
         .accessibilityElement(children: .contain)
     }
 
@@ -169,7 +207,16 @@ private struct ExplainerButton<Label: View>: View {
 
     var body: some View {
         if let explainer {
-            Button { isShowing = true } label: { label }
+            Button { isShowing = true } label: {
+                // The glyph says the term can be tapped.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    label
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(Theme.tertiary)
+                        .accessibilityHidden(true)
+                }
+            }
                 .buttonStyle(.plain)
                 .accessibilityHint("Explains this term")
                 .popover(isPresented: $isShowing) {
@@ -218,14 +265,9 @@ private struct LaunchDetails: View {
 
                 SequenceList(flight: flight)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    if let errorMessage = repository.errorMessage {
-                        NoticeText(message: errorMessage)
-                    }
-                    if let lastUpdated = repository.lastUpdated {
-                        Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                            .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
-                    }
+                if let lastUpdated = repository.lastUpdated {
+                    Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                        .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
                 }
             }
             .padding(.horizontal, Theme.gutter)

@@ -44,6 +44,8 @@ nonisolated struct StarshipFlightAttributes: ActivityAttributes, Sendable {
     let launchSite: String
 }
 
+/// Read by the widget's views. Main actor, because the app target isolates `LaunchStatus` there.
+@MainActor
 extension StarshipFlightAttributes.ContentState {
     var hasLiftedOff: Bool {
         liftoffConfirmed ?? LaunchStatus(name: status).confirmsLiftoff

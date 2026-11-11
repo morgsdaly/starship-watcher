@@ -62,6 +62,34 @@ extension StarshipFlight {
         return now >= launchDate.addingTimeInterval(-60) && isInActiveWindow(now: now)
     }
 
+    /// From T-10m to the last planned event the screen stays on: nobody wants to unlock at Max Q.
+    func keepsScreenAwake(now: Date = .now) -> Bool {
+        guard hasFirmDate, !status.isFinal, !status.isHoldOrTBD, let launchDate else { return false }
+        let end = hasLiftedOff(now: now)
+            ? (timeline.compactMap(\.targetDate).max() ?? launchDate).addingTimeInterval(2 * 60)
+            : launchDate.addingTimeInterval(15 * 60)
+        return now >= launchDate.addingTimeInterval(-10 * 60) && now <= end
+    }
+
+    /// "Window closes 9:30 PM", or a live "Window closes in 42:10" once NET has passed without
+    /// liftoff. Nil for an instantaneous window, a soft date, or after liftoff.
+    func windowText(now: Date, usesUTC: Bool) -> String? {
+        guard hasFirmDate, !status.confirmsLiftoff, let launchDate, let windowEnd,
+              windowEnd.timeIntervalSince(launchDate) >= 60 else { return nil }
+        if now >= launchDate {
+            guard let remaining = Countdown.remaining(to: windowEnd, now: now) else { return "Window closed" }
+            return "Window closes in \(remaining)"
+        }
+        let style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current).hour().minute()
+        return "Window closes \(windowEnd.formatted(style))" + (usesUTC ? " UTC" : "")
+    }
+
+    /// Other streams once the launch is close: independent commentary alongside the official feed.
+    func otherStreams(now: Date = .now) -> [FlightStream] {
+        guard isInActiveWindow(now: now), let streams else { return [] }
+        return streams.filter { $0.url != webcastURL }
+    }
+
     func isLive(now: Date = .now) -> Bool {
         webcastLive && isInActiveWindow(now: now)
     }
@@ -129,7 +157,9 @@ extension StarshipFlight {
 
 extension Date {
     func launchText(usesUTC: Bool, year: Bool = false) -> String {
-        var style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current).month(.abbreviated).day().hour().minute()
+        // The weekday matters far from the pad: launch day in Texas is often tomorrow elsewhere.
+        var style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current)
+            .weekday(.abbreviated).month(.abbreviated).day().hour().minute()
         if year { style = style.year() }
         return formatted(style) + (usesUTC ? " UTC" : "")
     }

@@ -29,6 +29,8 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     /// Editors' notes on this flight, newest first.
     var updates: [FlightUpdate]? = nil
     var failureReason: String? = nil
+    /// Every stream Launch Library lists, best first.
+    var streams: [FlightStream]? = nil
 
     var isUpcoming: Bool {
         guard let launchDate else { return true }
@@ -159,6 +161,12 @@ struct FlightVehicle: Codable, Hashable {
     let landingSummary: String?
     /// Nil until a landing attempt has an outcome.
     let landingSucceeded: Bool?
+}
+
+struct FlightStream: Codable, Hashable {
+    /// "SpaceX", "NASASpaceflight", or the site when no publisher is listed.
+    let name: String
+    let url: URL
 }
 
 struct FlightUpdate: Codable, Hashable {
