@@ -36,11 +36,14 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     }
 
     /// Worth a ticking clock: confirmed Go, already flown, or an exact time with a date set.
-    /// Otherwise the date is a placeholder (e.g. "To Be Determined", NET midnight UTC).
+    /// "To Be Confirmed" ticks only with a minute-precise time: SpaceX counts down to that target
+    /// well before Launch Library moves to Go. Otherwise the date is a placeholder
+    /// (e.g. "To Be Determined", NET midnight UTC).
     var hasFirmDate: Bool {
         guard launchDate != nil else { return false }
         if status.isGo || status.confirmsLiftoff { return true }
-        return !status.isTBD && !status.isTBC && hasExactTime != false
+        if status.isTBC { return hasExactTime == true }
+        return !status.isTBD && hasExactTime != false
     }
 
     var hasPublishedTimeline: Bool {
