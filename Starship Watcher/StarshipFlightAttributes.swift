@@ -51,18 +51,21 @@ extension StarshipFlightAttributes.ContentState {
         liftoffConfirmed ?? LaunchStatus(name: status).confirmsLiftoff
     }
 
-    /// What to count down to next: one event before liftoff and during ascent, then one per
-    /// vehicle once booster and ship fly apart.
+    /// What to count down to next: one event before liftoff, the next two during ascent, then
+    /// one per vehicle once booster and ship fly apart. Two rows in flight, so that when one
+    /// reaches zero between redraws the other is still counting.
     func nextEvents(now: Date) -> [StarshipFlightAttributes.Milestone] {
         guard headline == nil, let upcoming else { return [] }
-        let future = upcoming.filter { $0.date > now }
+        // A second's margin: a redraw landing on an event's own time must move past it,
+        // not show it frozen at 0:00.
+        let future = upcoming.filter { $0.date > now.addingTimeInterval(1) }
         guard hasLiftedOff else {
             // Liftoff itself is the main clock.
             return Array(future.filter { $0.phase == FlightPhase.preflight.rawValue }.prefix(1))
         }
         guard let first = future.first else { return [] }
         let split = [FlightPhase.booster.rawValue, FlightPhase.ship.rawValue]
-        guard split.contains(first.phase) else { return [first] }
+        guard split.contains(first.phase) else { return Array(future.prefix(2)) }
         return split.compactMap { phase in future.first { $0.phase == phase } }
     }
 

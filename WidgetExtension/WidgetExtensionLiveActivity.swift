@@ -15,38 +15,47 @@ struct WidgetExtensionLiveActivity: Widget {
         } dynamicIsland: { context in
             let status = LaunchStatus(name: context.state.status)
             return DynamicIsland {
+                // The regions either side of the camera are narrow and cut by its housing, so they
+                // carry only the ship and one status word. The name sits below, where there is room.
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 10) {
-                        StarshipMark(color: status.markColor)
-                            .frame(height: 30)
-                        Text(context.attributes.shortName)
-                            .caps(.caption, tracking: 1.5)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .padding(.leading, 8)
+                    StarshipMark(color: status.markColor, glows: false)
+                        .frame(height: 28)
+                        .padding(.leading, 12)
+                        .padding(.top, 2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    StatusBadge(status: status)
-                        .padding(.trailing, 8)
+                    Text(status.shortName)
+                        .caps(.caption, color: status.color, tracking: 1.5)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.trailing, 12)
+                        .padding(.top, 6)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        ActivityClock(state: context.state, font: .title)
-                        ActivityStage(state: context.state)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            ActivityClock(state: context.state, font: .title)
+                            Spacer(minLength: 8)
+                            Text(context.attributes.shortName)
+                                .caps(.caption2, color: Theme.secondary, tracking: 1.5)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .layoutPriority(1)
+                        }
+                        ActivityStage(state: context.state, limit: 1)
                         ActivityRail(state: context.state, showsLabels: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
                 }
             } compactLeading: {
                 CompactStatus(status: status)
             } compactTrailing: {
                 CompactCountdown(state: context.state)
             } minimal: {
-                StarshipMark(color: status.markColor)
-                    .frame(height: 22)
+                StarshipMark(color: status.markColor, glows: false)
+                    .frame(height: 20)
             }
             .widgetURL(context.attributes.url)
             .keylineTint(Color.white.opacity(0.55))
@@ -138,9 +147,10 @@ private struct CompactStatus: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         } else {
-            StarshipMark(color: status.markColor)
-                .frame(height: 22)
-                .padding(.leading, 2)
+            // No glow here: the island's edge clips it into a smudge.
+            StarshipMark(color: status.markColor, glows: false)
+                .frame(height: 20)
+                .padding(.leading, 6)
         }
     }
 }
@@ -191,7 +201,8 @@ private struct CompactCountdown: View {
             } else if let targetDate = state.targetDate, targetDate > now {
                 Text(timerInterval: now...targetDate, countsDown: true)
             } else if let targetDate = state.targetDate, state.hasLiftedOff {
-                Text(targetDate, style: .timer)
+                // A bare "3:18" reads as time remaining.
+                Text("T+\(Text(targetDate, style: .timer))")
             } else if state.targetDate != nil {
                 Text("T-0")
             } else {
@@ -201,7 +212,7 @@ private struct CompactCountdown: View {
         .font(.caption.weight(.light).monospacedDigit())
         .foregroundStyle(.white)
         .multilineTextAlignment(.trailing)
-        .frame(maxWidth: 52, alignment: .trailing)
+        .frame(maxWidth: 64, alignment: .trailing)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
     }
@@ -211,10 +222,12 @@ private struct CompactCountdown: View {
 /// running between updates. Falls back to the last known stage when there is nothing to count to.
 private struct ActivityStage: View {
     let state: StarshipFlightAttributes.ContentState
+    /// Rows to show. The island has room for one.
+    var limit = 2
 
     var body: some View {
         let now = Date.now
-        let next = state.nextEvents(now: now)
+        let next = Array(state.nextEvents(now: now).prefix(limit))
         if state.canMarkLiftoff(now: now) {
             HStack(alignment: .center) {
                 StageText(state: state)
@@ -288,9 +301,7 @@ private struct ActivityRail: View {
                         if showsLabels {
                             let started = runs && (window.map { $0.start <= now } ?? false)
                             Text(phase.rawValue)
-                                .caps(.caption2, color: started ? .white : Theme.tertiary, tracking: 1)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
+                                .railLabel(isLit: started)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
