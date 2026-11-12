@@ -181,10 +181,11 @@ struct StarshipActivityController {
         await activity.end(final, dismissalPolicy: .after(.now.addingTimeInterval(linger)))
     }
 
-    /// Stale at the next planned event: iOS redraws the activity then, which moves the countdowns
-    /// on to the following event without the app running.
+    /// Stale just after the next planned event: iOS redraws the activity then, which moves the
+    /// countdowns on to the following event without the app running. Two seconds late, so the
+    /// redraw is safely past the event rather than level with it.
     private func content(_ state: StarshipFlightAttributes.ContentState) -> ActivityContent<StarshipFlightAttributes.ContentState> {
-        ActivityContent(state: state, staleDate: state.upcoming?.first?.date)
+        ActivityContent(state: state, staleDate: state.upcoming?.first?.date.addingTimeInterval(2))
     }
 
     /// Slips smaller than this update the countdown silently. Launch Library nudges NET often on

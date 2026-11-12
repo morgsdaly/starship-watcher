@@ -159,15 +159,27 @@ struct PhaseRailView: View {
                         }
                     if showsLabels {
                         Text(phase.rawValue)
-                            .caps(.caption2, color: fill > 0 ? .white : Theme.tertiary, tracking: 1)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                            .railLabel(isLit: fill > 0)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// One fixed size for all four rail labels. Scaling each to fit made "Preflight" shrink
+    /// beside a full-size "Ship".
+    func railLabel(isLit: Bool) -> some View {
+        self
+            .font(.system(size: 9, weight: .medium))
+            .textCase(.uppercase)
+            .tracking(0.6)
+            .foregroundStyle(isLit ? Color.white : Theme.tertiary)
+            .lineLimit(1)
+            .allowsTightening(true)
     }
 }
 
