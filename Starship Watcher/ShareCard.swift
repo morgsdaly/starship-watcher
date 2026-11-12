@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A picture of the flight for Messages or social: name, time, place, status.
 struct ShareCard: View {

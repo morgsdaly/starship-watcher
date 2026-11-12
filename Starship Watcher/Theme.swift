@@ -77,9 +77,9 @@ enum Countdown {
         guard let target else { return "TBD" }
         // Nearest second: with ticks aligned to the target (`tickAnchor`) every value shows for
         // exactly one second, where truncating held 00:00:00 for two.
-        let seconds = Int(target.timeIntervalSince(now).rounded())
-        let sign = seconds > 0 ? "T-" : "T+"
-        let remaining = abs(seconds)
+        let rounded = Int(target.timeIntervalSince(now).rounded())
+        let sign = rounded > 0 ? "T-" : "T+"
+        let remaining = abs(rounded)
         let days = remaining / 86_400
         let hours = remaining / 3_600 % 24
         let minutes = remaining / 60 % 60
