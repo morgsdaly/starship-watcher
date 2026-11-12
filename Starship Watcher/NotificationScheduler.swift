@@ -6,7 +6,13 @@ import ActivityKit
 
 struct NotificationScheduler {
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
+        allows("notificationsEnabled")
+    }
+
+    /// Per-reminder switches in Settings: "reminderDayBefore", "reminderCountdown",
+    /// "reminderWebcast", "reminderChanges". All on until turned off.
+    static func allows(_ key: String) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
 
     func requestAuthorization() async -> Bool {
@@ -27,21 +33,25 @@ struct NotificationScheduler {
         // permission, so the system prompt first appears when there is a launch to be reminded of.
         guard Self.isEnabled, let flight, flight.hasFirmDate, await requestAuthorization() else { return }
 
-        schedule(title: "Starship launch tomorrow", body: flight.shortName, date: flight.launchDate?.addingTimeInterval(-24 * 60 * 60), identifier: "\(flight.id)-24h")
-        if let liveLead = liveActivityLead, !hasLiveActivity(for: flight) {
+        if Self.allows("reminderDayBefore") {
+            schedule(title: "Starship launch tomorrow", body: flight.shortName, date: flight.launchDate?.addingTimeInterval(-24 * 60 * 60), identifier: "\(flight.id)-24h")
+        }
+        if Self.allows("reminderCountdown"), let liveLead = liveActivityLead, !hasLiveActivity(for: flight) {
             // Opening the app from this starts the Live Activity if iOS didn't let it start in the background.
             let hours = Int(liveLead / 3600)
             schedule(title: "Starship launch in \(hours) hour\(hours == 1 ? "" : "s")", body: "Tap to pin the \(flight.shortName) countdown to your Lock Screen.", date: flight.launchDate?.addingTimeInterval(-liveLead), identifier: "\(flight.id)-live")
         }
         // Not `windowStart`: for Starship it usually equals NET, so the reminder landed at liftoff.
-        schedule(title: "Starship webcast starting soon", body: "\(flight.shortName) launches in about 30 minutes.", date: flight.launchDate?.addingTimeInterval(-30 * 60), identifier: "\(flight.id)-stream")
+        if Self.allows("reminderWebcast") {
+            schedule(title: "Starship webcast starting soon", body: "\(flight.shortName) launches in about 30 minutes.", date: flight.launchDate?.addingTimeInterval(-30 * 60), identifier: "\(flight.id)-stream")
+        }
     }
 
     /// Tells the user what a background refresh found: a new date, a hold, Go, liftoff, the result.
     /// Never prompts, and stays quiet while the Live Activity is up, which alerts for itself.
     func notifyChange(from old: StarshipFlight?, to new: StarshipFlight?) async {
-        guard Self.isEnabled, let old, let new, old.id == new.id, !hasLiveActivity(for: new),
-              let body = Self.changeText(from: old, to: new) else { return }
+        guard Self.isEnabled, Self.allows("reminderChanges"), let old, let new, old.id == new.id,
+              !hasRunningActivity(for: new), let body = Self.changeText(from: old, to: new) else { return }
         let center = UNUserNotificationCenter.current()
         guard await center.notificationSettings().authorizationStatus == .authorized else { return }
 
@@ -91,9 +101,19 @@ struct NotificationScheduler {
         #endif
     }
 
-    private func hasLiveActivity(for flight: StarshipFlight) -> Bool {
+    /// On screen now. A booked activity doesn't count: it can't alert until it starts.
+    private func hasRunningActivity(for flight: StarshipFlight) -> Bool {
         #if canImport(ActivityKit)
         StarshipActivityController.liveActivities.contains { $0.attributes.flightID == flight.id }
+        #else
+        false
+        #endif
+    }
+
+    /// Running or booked with iOS, so no reminder is needed to get it onto the Lock Screen.
+    private func hasLiveActivity(for flight: StarshipFlight) -> Bool {
+        #if canImport(ActivityKit)
+        StarshipActivityController.hasActivity(for: flight)
         #else
         false
         #endif

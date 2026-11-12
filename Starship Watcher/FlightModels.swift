@@ -31,6 +31,9 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     var failureReason: String? = nil
     /// Every stream Launch Library lists, best first.
     var streams: [FlightStream]? = nil
+    /// Where the pad is, for the forecast. Nil when Launch Library doesn't say.
+    var padLatitude: Double? = nil
+    var padLongitude: Double? = nil
 
     var isUpcoming: Bool {
         guard let launchDate else { return true }
@@ -161,6 +164,20 @@ struct FlightVehicle: Codable, Hashable {
     let landingSummary: String?
     /// Nil until a landing attempt has an outcome.
     let landingSucceeded: Bool?
+    /// "Booster" or "Ship". Nil in caches from older builds.
+    var role: String? = nil
+    /// How and where it is meant to come down: "Tower catch · Starbase". Nil when unlisted.
+    var landingPlan: String? = nil
+}
+
+/// Something on the road to a launch: a static fire, a rollout, a wet dress rehearsal.
+struct CampaignEvent: Identifiable, Codable, Hashable {
+    let id: Int
+    let name: String
+    /// "Static Fire", "Rollout". Nil when Launch Library gives no type.
+    let kind: String?
+    let date: Date
+    let summary: String?
 }
 
 struct FlightStream: Codable, Hashable {
@@ -210,6 +227,7 @@ struct FlightEvent: Identifiable, Codable, Hashable {
             (-30, "Go for launch", .preflight),
             (0, "Liftoff", .ascent),
             (45, "Max Q", .ascent),
+            (2 * 60 + 22, "Booster engine cutoff", .ascent),
             (2 * 60 + 24, "Hot staging", .ascent),
             (2 * 60 + 30, "Boostback burn", .booster),
             (6 * 60 + 34, "Booster landing burn", .booster),

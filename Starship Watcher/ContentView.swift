@@ -7,6 +7,9 @@ struct ContentView: View {
     @AppStorage("usesUTC") private var usesUTC = false
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("liveActivityEnabled") private var liveActivityEnabled = true
+    @AppStorage("reminderDayBefore") private var reminderDayBefore = true
+    @AppStorage("reminderCountdown") private var reminderCountdown = true
+    @AppStorage("reminderWebcast") private var reminderWebcast = true
     @AppStorage("mockFlightEnabled") private var mockFlightEnabled = false
     @AppStorage("mockFlightMode") private var mockFlightMode = MockFlightMode.liftoff
     @Environment(\.scenePhase) private var scenePhase
@@ -63,7 +66,7 @@ struct ContentView: View {
                 await syncLiveActivity()
             }
         }
-        .onChange(of: notificationsEnabled) { _, _ in
+        .onChange(of: [notificationsEnabled, reminderDayBefore, reminderCountdown, reminderWebcast]) { _, _ in
             Task { await NotificationScheduler().sync(flight: repository.nextFlight) }
         }
         .onChange(of: mockFlightEnabled) { _, _ in
