@@ -31,6 +31,16 @@ struct StarshipActivityController {
         !liveActivities.isEmpty
     }
 
+    /// Scheduled with iOS to start by themselves at the lead time, app open or not.
+    static var pendingActivities: [Activity<StarshipFlightAttributes>] {
+        Activity<StarshipFlightAttributes>.activities.filter { $0.activityState == .pending }
+    }
+
+    /// Running now, or booked to start: either way the countdown will reach the Lock Screen.
+    static func hasActivity(for flight: StarshipFlight) -> Bool {
+        (liveActivities + pendingActivities).contains { $0.attributes.flightID == flight.id }
+    }
+
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "liveActivityEnabled") as? Bool ?? true
     }
@@ -70,11 +80,40 @@ struct StarshipActivityController {
             return
         }
 
+        // A booking is only good while the flight still has the time it was made for.
+        let target = Self.isEnabled && Self.canStart(flight) ? flight.launchDate : nil
+        if let pending = Self.pendingActivities.first(where: { $0.attributes.flightID == flight.id }),
+           let target, pending.content.state.targetDate == target, Date.now < Self.windowStart(for: target) {
+            await endAll(except: pending.id)
+            return
+        }
+
         await endAll()
-        guard canStart, Self.isEnabled, Self.canStart(flight) else { return }
+        guard canStart, let launchDate = target else { return }
         // A mock starts right away, whatever its lead.
-        guard let launchDate = flight.launchDate, flight.isMock || Date.now >= Self.windowStart(for: launchDate) else { return }
-        try? request(for: flight)
+        if flight.isMock || Date.now >= Self.windowStart(for: launchDate) {
+            try? request(for: flight)
+        } else {
+            try? schedule(flight, launchDate: launchDate)
+        }
+    }
+
+    /// Books the activity with iOS, which starts it at the lead time even if the app is never
+    /// opened again. Before this the start depended on someone tapping a reminder at T-3h.
+    private func schedule(_ flight: StarshipFlight, launchDate: Date) throws {
+        let start = Self.windowStart(for: launchDate)
+        _ = try Activity.request(
+            attributes: attributes(for: flight),
+            content: content(contentState(for: flight, now: start)),
+            pushType: nil,
+            style: .standard,
+            alertConfiguration: AlertConfiguration(
+                title: "\(flight.shortName) countdown",
+                body: "Liftoff in \(Int(Self.lead / 3600)) hours. The countdown is on your Lock Screen.",
+                sound: .default
+            ),
+            start: start
+        )
     }
 
     /// Firm, not over, and not long gone: opening the app after a flight must not pin a new countdown.
@@ -89,6 +128,7 @@ struct StarshipActivityController {
             await update(existing, for: flight)
             return
         }
+        // endAll below also cancels a booking, which this start replaces.
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { throw CountdownStartError.activitiesDisabled }
         guard Self.canStart(flight), let launchDate = flight.launchDate else { throw CountdownStartError.launchTBD }
         guard launchDate.timeIntervalSinceNow <= Self.maxLead else { throw CountdownStartError.tooEarly }
@@ -98,20 +138,23 @@ struct StarshipActivityController {
     }
 
     private func request(for flight: StarshipFlight) throws {
-        let attributes = StarshipFlightAttributes(
+        _ = try Activity.request(attributes: attributes(for: flight), content: content(contentState(for: flight)), pushType: nil)
+    }
+
+    private func attributes(for flight: StarshipFlight) -> StarshipFlightAttributes {
+        StarshipFlightAttributes(
             flightID: flight.id,
             flightName: flight.name,
             vehicle: flight.vehicle,
             launchSite: flight.launchSite
         )
-        _ = try Activity.request(attributes: attributes, content: content(contentState(for: flight)), pushType: nil)
     }
 
-    /// Ends running activities. Finished ones showing a result are left to their dismissal time
-    /// unless `includingEnded` clears the Lock Screen completely.
+    /// Ends running activities and cancels booked ones. Finished ones showing a result are left
+    /// to their dismissal time unless `includingEnded` clears the Lock Screen completely.
     func endAll(except keptID: String? = nil, includingEnded: Bool = false) async {
         for activity in Activity<StarshipFlightAttributes>.activities where activity.id != keptID {
-            let isLive = activity.activityState == .active || activity.activityState == .stale
+            let isLive = [.active, .stale, .pending].contains(activity.activityState)
             guard isLive || includingEnded else { continue }
             await activity.end(ActivityContent(state: activity.content.state, staleDate: nil), dismissalPolicy: .immediate)
         }
@@ -185,8 +228,8 @@ struct StarshipActivityController {
 
     /// Without ActivityKit push the state only changes at sync points (foreground, BG refresh), so it
     /// carries the plan ahead and the widget counts down to it by itself. Stage changes never alert.
-    private func contentState(for flight: StarshipFlight, headline: String? = nil, stage: String? = nil) -> StarshipFlightAttributes.ContentState {
-        let now = Date.now
+    /// `now` is the moment the state describes: the present, or the start time of a booked activity.
+    private func contentState(for flight: StarshipFlight, now: Date = .now, headline: String? = nil, stage: String? = nil) -> StarshipFlightAttributes.ContentState {
         let liftedOff = flight.hasLiftedOff(now: now)
         return StarshipFlightAttributes.ContentState(
             phase: flight.currentEvent(now: now)?.phase.rawValue ?? "Countdown",

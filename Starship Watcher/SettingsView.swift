@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Binding var usesUTC: Bool
@@ -7,19 +8,34 @@ struct SettingsView: View {
     @Binding var mockFlightEnabled: Bool
     @Binding var mockFlightMode: MockFlightMode
 
+    @AppStorage("reminderDayBefore") private var reminderDayBefore = true
+    @AppStorage("reminderCountdown") private var reminderCountdown = true
+    @AppStorage("reminderWebcast") private var reminderWebcast = true
+    @AppStorage("reminderChanges") private var reminderChanges = true
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Toggle("Use UTC", isOn: $usesUTC)
                     Toggle("Launch reminders", isOn: $notificationsEnabled)
+                    if notificationsEnabled {
+                        Group {
+                            Toggle("The day before", isOn: $reminderDayBefore)
+                            Toggle("Countdown ready to pin", isOn: $reminderCountdown)
+                            Toggle("30 minutes before", isOn: $reminderWebcast)
+                            Toggle("New dates, holds and results", isOn: $reminderChanges)
+                        }
+                        .padding(.leading, 16)
+                        .foregroundStyle(Theme.secondary)
+                    }
                     Toggle("Live Activity", isOn: $liveActivityEnabled)
                     if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
                         Link("Permissions in iOS Settings", destination: settingsURL)
                             .foregroundStyle(.white)
                     }
                 } footer: {
-                    Text("The Live Activity pins the countdown to your Lock Screen from three hours before liftoff. Reminders also cover new dates, holds and results.")
+                    Text("The Live Activity pins the countdown to your Lock Screen from three hours before liftoff. iOS starts it by itself once a launch time is set.")
                 }
                 .listRowBackground(Color.black)
                 .listRowSeparatorTint(Theme.hairline)

@@ -18,8 +18,30 @@ struct StartLaunchCountdownIntent: LiveActivityIntent {
     }
 }
 
+/// "When's the next Starship Watcher launch?" Siri reads the answer; nothing opens.
+struct NextLaunchIntent: AppIntent {
+    static let title: LocalizedStringResource = "Next Starship Launch"
+    static let description = IntentDescription("Says when the next Starship flight is due.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let repository = FlightRepository()
+        await repository.refresh(minInterval: 15 * 60)
+        guard let flight = repository.nextFlight else {
+            return .result(dialog: "No Starship flight is listed yet.")
+        }
+        return .result(dialog: "\(flight.spokenSummary())")
+    }
+}
+
 struct StarshipShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: NextLaunchIntent(),
+            phrases: ["When is the next \(.applicationName) launch", "Next launch in \(.applicationName)"],
+            shortTitle: "Next Launch",
+            systemImageName: "calendar"
+        )
         AppShortcut(
             intent: StartLaunchCountdownIntent(),
             phrases: ["Start the \(.applicationName) countdown", "Pin the \(.applicationName) countdown"],

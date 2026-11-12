@@ -11,6 +11,8 @@ final class FlightRepository {
     private(set) var lastUpdated: Date?
     /// Takes over as next flight. Kept out of `flights`, so real data and its cache stay untouched.
     private(set) var mockFlight: StarshipFlight?
+    /// Upcoming static fires, rollouts and other tests. Empty when Launch Library lists none.
+    private(set) var campaignEvents: [CampaignEvent] = []
 
     private let client: LaunchLibraryClient
 
@@ -21,6 +23,10 @@ final class FlightRepository {
             lastUpdated = cached.lastUpdated
         }
         mockFlight = MockFlight.current()
+        if let data = UserDefaults.standard.data(forKey: Self.campaignEventsKey),
+           let events = try? JSONDecoder.starship.decode([CampaignEvent].self, from: data) {
+            campaignEvents = events.filter { $0.date > .now }
+        }
     }
 
     /// True during the very first fetch when no trusted data has ever loaded — used to
@@ -116,6 +122,12 @@ final class FlightRepository {
             flights = merged
             lastUpdated = .now
             saveCachedFlights(merged)
+            // Tests are scheduled days ahead, so they ride along with the slow refresh. A failure
+            // here keeps the last list and never counts against the flights.
+            if includePrevious, let events = try? await client.fetchCampaignEvents() {
+                campaignEvents = events.filter { $0.date > .now }
+                defaults.set(try? JSONEncoder.starship.encode(campaignEvents), forKey: Self.campaignEventsKey)
+            }
         } catch LaunchLibraryError.rateLimited(let retryAfter) {
             defaults.set(now.addingTimeInterval(retryAfter ?? 15 * 60), forKey: Self.cooldownKey)
             errorMessage = "Launch Library rate limit reached. Showing saved data."
@@ -127,6 +139,7 @@ final class FlightRepository {
     private static let lastAttemptKey = "launchDataLastAttempt"
     private static let lastPreviousFetchKey = "launchDataLastPreviousFetch"
     private static let cooldownKey = "launchDataCooldownUntil"
+    private static let campaignEventsKey = "campaignEvents"
 
     private func saveCachedFlights(_ flights: [StarshipFlight]) {
         do {

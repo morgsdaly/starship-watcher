@@ -132,6 +132,31 @@ extension StarshipFlight {
         }
     }
 
+    /// "Today", "Tomorrow", "In 3 days", by the viewer's own calendar: launch day at the pad is
+    /// often a different date at home. Nil beyond a week, once passed, or for a soft date.
+    func relativeDay(now: Date = .now) -> String? {
+        guard hasFirmDate, let launchDate, launchDate > now else { return nil }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(launchDate) { return "Today" }
+        if calendar.isDateInTomorrow(launchDate) { return "Tomorrow" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: launchDate)).day ?? 0
+        return (2...6).contains(days) ? "In \(days) days" : nil
+    }
+
+    /// For Siri: one or two sentences that stand on their own.
+    func spokenSummary(now: Date = .now) -> String {
+        guard hasFirmDate, let launchDate else {
+            return launchDate == nil
+                ? "\(shortName) has no launch date yet."
+                : "\(shortName) has no firm launch time yet. The target is \(netText.replacing("NET ", with: "no earlier than "))."
+        }
+        if status.isFinal { return "\(shortName) has flown. \(status.displayName)." }
+        if status.confirmsLiftoff { return "\(shortName) is in flight." }
+        if launchDate <= now { return "\(shortName) is past its target time and waiting for liftoff. Status: \(status.displayName)." }
+        let day = relativeDay(now: now).map { "\($0.lowercased()), " } ?? ""
+        return "\(shortName) is targeting \(day)\(launchDate.launchText(usesUTC: false)), from \(placeText.replacing(" · ", with: ", ")). Status: \(status.displayName)."
+    }
+
     /// Firm flights get date and time, the rest a NET date.
     func dateText(usesUTC: Bool, year: Bool = false) -> String {
         guard hasFirmDate, let launchDate else { return netText }

@@ -1,9 +1,13 @@
 import SwiftUI
+import UIKit
 
 /// The next flight: a full-screen hero over its photo, then mission text and the sequence on black.
 struct LaunchView: View {
     let repository: FlightRepository
     let usesUTC: Bool
+
+    @State private var shareCard: UIImage?
+    @State private var showsCalendar = false
 
     private var flight: StarshipFlight? {
         repository.nextFlight
@@ -22,11 +26,37 @@ struct LaunchView: View {
             .toolbar {
                 if let flight {
                     ToolbarItem(placement: .topBarTrailing) {
-                        ShareLink(item: flight.shareText) {
+                        Menu {
+                            if let shareCard {
+                                let image = Image(uiImage: shareCard)
+                                ShareLink(item: image, preview: SharePreview(flight.shortName, image: image)) {
+                                    Label("Share card", systemImage: "photo")
+                                }
+                            }
+                            ShareLink(item: flight.shareText) {
+                                Label("Share details", systemImage: "text.alignleft")
+                            }
+                            if flight.hasFirmDate, !flight.status.confirmsLiftoff, !flight.isMock {
+                                Button {
+                                    showsCalendar = true
+                                } label: {
+                                    Label("Add to Calendar", systemImage: "calendar.badge.plus")
+                                }
+                            }
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                         .accessibilityLabel("Share flight")
                     }
+                }
+            }
+            .task(id: flight) {
+                shareCard = flight?.shareCardImage(usesUTC: usesUTC)
+            }
+            .sheet(isPresented: $showsCalendar) {
+                if let flight {
+                    CalendarEventSheet(flight: flight)
+                        .ignoresSafeArea()
                 }
             }
             .refreshingToolbar(isLoading: repository.isLoading)
@@ -108,7 +138,9 @@ private struct LaunchHero: View {
                             Text("● Live").caps(color: Theme.alert)
                         }
                     }
-                    Text(flight.hasFirmDate ? "\(flight.dateText(usesUTC: usesUTC)) · \(flight.placeText)" : flight.placeText)
+                    Text([flight.relativeDay(now: now), flight.hasFirmDate ? flight.dateText(usesUTC: usesUTC) : nil, flight.placeText]
+                        .compactMap { $0 }
+                        .joined(separator: " · "))
                         .caps(.caption, color: Theme.secondary, tracking: 1.5)
                         .fixedSize(horizontal: false, vertical: true)
                     if let windowText = flight.windowText(now: now, usesUTC: usesUTC) {
@@ -261,7 +293,11 @@ private struct LaunchDetails: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                FlightFacts(flight: flight, usesUTC: usesUTC)
+                LaunchWeatherSection(flight: flight)
+
+                FlightFacts(flight: flight, usesUTC: usesUTC, allFlights: repository.flights)
+
+                CampaignSection(events: repository.campaignEvents, usesUTC: usesUTC)
 
                 SequenceList(flight: flight)
 
