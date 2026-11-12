@@ -30,7 +30,29 @@ final class FlightRepository {
     }
 
     var nextFlight: StarshipFlight? {
-        mockFlight ?? flights.nextFlight
+        // The liftoff mark lives in UserDefaults; reading this makes views follow it.
+        _ = liftoffMarkRevision
+        return mockFlight ?? flights.nextFlight
+    }
+
+    private var liftoffMarkRevision = 0
+
+    /// The viewer saw it leave the pad: start the mission clock now, ahead of Launch Library.
+    func markLiftoff(at date: Date = .now) {
+        guard let flight = nextFlight, flight.canMarkLiftoff(now: date) else { return }
+        ManualLiftoff.mark(flightID: flight.id, at: date)
+        liftoffMarksChanged()
+    }
+
+    func clearLiftoffMark() {
+        ManualLiftoff.clear()
+        liftoffMarksChanged()
+    }
+
+    /// Also picks up a mark made from the Live Activity while the app was in the background.
+    func liftoffMarksChanged() {
+        liftoffMarkRevision += 1
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// Picks up a mock starting, stopping or changing status with the clock.
@@ -69,7 +91,13 @@ final class FlightRepository {
             guard let launchDate = flight.launchDate else { return false }
             return launchDate > lastPreviousFetch && launchDate < now
         }
-        let includePrevious = launchedSinceFetch || now.timeIntervalSince(lastPreviousFetch) > 6 * 60 * 60 || lastUpdated == nil
+        // Not around liftoff, though: the second request would come out of the once-a-minute budget.
+        let nearLiftoff = flights.contains { flight in
+            guard let launchDate = flight.launchDate else { return false }
+            return abs(launchDate.timeIntervalSince(now)) < 20 * 60
+        }
+        let includePrevious = lastUpdated == nil
+            || (!nearLiftoff && (launchedSinceFetch || now.timeIntervalSince(lastPreviousFetch) > 6 * 60 * 60))
 
         do {
             let fetchedFlights = try await client.fetchStarshipFlights(includePrevious: includePrevious)

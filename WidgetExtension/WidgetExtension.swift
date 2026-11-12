@@ -22,10 +22,10 @@ struct Provider: AppIntentTimelineProvider {
         let now = Date()
         let reloadDate = now.addingTimeInterval(60 * 60)
         // "T-1D 12H" needs a fresh entry each hour, and the timer text ticks on its own.
-        // The large widget's stage changes at each event, and the pin button appears at T-8h.
+        // The large widget's stage changes at each event, and the pin button appears at T-4h.
         var dates = stride(from: 0, to: 60, by: 15).map { now.addingTimeInterval(TimeInterval($0 * 60)) }
         if let flight, flight.hasFirmDate, let launchDate = flight.launchDate {
-            dates += flight.timeline.compactMap(\.targetDate) + [launchDate.addingTimeInterval(-8 * 60 * 60)]
+            dates += flight.timeline.compactMap(\.targetDate) + [launchDate.addingTimeInterval(-4 * 60 * 60)]
         }
         let entries = dates
             .filter { $0 >= now && $0 < reloadDate }
@@ -295,14 +295,15 @@ private struct WidgetClock: View {
     }
 }
 
-/// Starts the Live Activity in place. Only shown inside the 8 hour Live Activity limit.
+/// Starts the Live Activity in place. Only from T-4h: iOS ends an activity 8 hours after it
+/// starts, and it has to outlast the flight and any holds.
 private struct StartCountdownButton: View {
     let flight: StarshipFlight
     let now: Date
 
     var body: some View {
         if flight.hasFirmDate, let launchDate = flight.launchDate,
-           launchDate > now, launchDate.timeIntervalSince(now) <= 8 * 60 * 60 {
+           launchDate > now, launchDate.timeIntervalSince(now) <= 4 * 60 * 60 {
             Button(intent: StartLaunchCountdownIntent()) {
                 Label("Pin", systemImage: "pin")
                     .caps(.caption2, tracking: 2)

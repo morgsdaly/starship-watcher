@@ -2,28 +2,15 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
-struct StarshipFlightAttributes: ActivityAttributes, Sendable {
-    struct ContentState: Codable, Hashable, Sendable {
-        let phase: String
-        let status: String
-        let targetDate: Date?
-        let detail: String
-        /// Current mission event ("Hot staging"). Optional so states from older builds still decode.
-        var stage: String? = nil
-    }
-
-    let flightID: String
-    let flightName: String
-    let vehicle: String
-    let launchSite: String
-}
+// `StarshipFlightAttributes` lives in the app folder and is compiled into both targets.
 
 struct WidgetExtensionLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: StarshipFlightAttributes.self) { context in
-            LockScreenActivity(attributes: context.attributes, state: context.state)
+            ActivityContentView(attributes: context.attributes, state: context.state)
                 .activityBackgroundTint(Color.black)
                 .activitySystemActionForegroundColor(Color.white)
+                .widgetURL(context.attributes.url)
         } dynamicIsland: { context in
             let status = LaunchStatus(name: context.state.status)
             return DynamicIsland {
@@ -45,12 +32,8 @@ struct WidgetExtensionLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
                         ActivityClock(state: context.state, font: .title)
-                        HStack(alignment: .firstTextBaseline) {
-                            StageText(state: context.state)
-                            Spacer(minLength: 8)
-                            DetailText(state: context.state)
-                        }
-                        PhaseRailView(fills: context.state.phaseFills, isAlert: status.isAlert, showsLabels: false)
+                        ActivityStage(state: context.state)
+                        ActivityRail(state: context.state, showsLabels: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8)
@@ -64,9 +47,50 @@ struct WidgetExtensionLiveActivity: Widget {
                 StarshipMark(color: status.markColor)
                     .frame(height: 22)
             }
-            .widgetURL(URL(string: "starshipwatcher://flight/\(context.attributes.flightID)"))
+            .widgetURL(context.attributes.url)
             .keylineTint(Color.white.opacity(0.55))
         }
+        // Apple Watch Smart Stack and CarPlay.
+        .supplementalActivityFamilies([.small])
+    }
+}
+
+/// The Lock Screen banner, or the compact layout the Watch and CarPlay ask for.
+private struct ActivityContentView: View {
+    let attributes: StarshipFlightAttributes
+    let state: StarshipFlightAttributes.ContentState
+
+    @Environment(\.activityFamily) private var activityFamily
+
+    var body: some View {
+        if activityFamily == .small {
+            SmallActivity(attributes: attributes, state: state)
+        } else {
+            LockScreenActivity(attributes: attributes, state: state)
+        }
+    }
+}
+
+private struct SmallActivity: View {
+    let attributes: StarshipFlightAttributes
+    let state: StarshipFlightAttributes.ContentState
+
+    var body: some View {
+        let status = LaunchStatus(name: state.status)
+        HStack(alignment: .center, spacing: 10) {
+            StarshipMark(color: status.markColor, glows: false)
+                .frame(height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(attributes.shortName) · \(status.shortName)")
+                    .caps(.caption2, color: Theme.secondary, tracking: 1)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                ActivityClock(state: state, font: .title3)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 }
 
@@ -90,12 +114,8 @@ struct LockScreenActivity: View {
                     StatusBadge(status: status)
                 }
                 ActivityClock(state: state, font: .largeTitle)
-                HStack(alignment: .firstTextBaseline) {
-                    StageText(state: state)
-                    Spacer(minLength: 8)
-                    DetailText(state: state)
-                }
-                PhaseRailView(fills: state.phaseFills, isAlert: status.isAlert)
+                ActivityStage(state: state)
+                ActivityRail(state: state)
                     .padding(.top, 2)
             }
         }
@@ -131,16 +151,20 @@ private struct ActivityClock: View {
     let font: Font
 
     var body: some View {
+        let now = Date.now
         Group {
-            if let targetDate = state.targetDate {
-                if targetDate > .now {
-                    Text("T-\(Text(timerInterval: Date.now...targetDate, countsDown: true))")
-                } else if LaunchStatus(name: state.status).isHoldOrTBD {
-                    Text("Awaiting liftoff")
-                } else {
-                    // Re-rendered when the activity goes stale at the target date. Unlike the app it runs on
-                    // while Go: between background refreshes a frozen clock would look broken mid-flight.
+            if let headline = state.headline {
+                // Over: the result, not a clock that runs on.
+                Text(headline)
+            } else if let targetDate = state.targetDate {
+                if targetDate > now {
+                    Text("T-\(Text(timerInterval: now...targetDate, countsDown: true))")
+                } else if state.hasLiftedOff {
                     Text("T+\(Text(targetDate, style: .timer))")
+                } else {
+                    // Redrawn when the activity goes stale at the target date. NET passing isn't
+                    // liftoff: the mission clock waits for the status or the viewer's mark.
+                    Text("Awaiting liftoff")
                 }
             } else {
                 Text("Date TBD")
@@ -148,7 +172,7 @@ private struct ActivityClock: View {
         }
         .font(font.weight(.light).monospacedDigit())
         .textCase(.uppercase)
-        .foregroundStyle(.white)
+        .foregroundStyle(LaunchStatus(name: state.status).markColor)
         .lineLimit(1)
         .minimumScaleFactor(0.5)
     }
@@ -158,16 +182,17 @@ private struct CompactCountdown: View {
     let state: StarshipFlightAttributes.ContentState
 
     var body: some View {
+        let now = Date.now
+        let status = LaunchStatus(name: state.status)
         Group {
-            if let targetDate = state.targetDate, targetDate > .now {
-                if targetDate.timeIntervalSinceNow >= 86400 {
-                    Text("\(Int(targetDate.timeIntervalSinceNow / 86400))d")
-                } else {
-                    Text(timerInterval: Date.now...targetDate, countsDown: true)
-                }
+            if state.headline != nil || status.isFinal {
+                Text("—")
+            } else if let targetDate = state.targetDate, targetDate > now {
+                Text(timerInterval: now...targetDate, countsDown: true)
+            } else if let targetDate = state.targetDate, state.hasLiftedOff {
+                Text(targetDate, style: .timer)
             } else if state.targetDate != nil {
-                Text(targetDateIsLive ? "LIVE" : "—")
-                    .foregroundStyle(targetDateIsLive ? Theme.alert : .white)
+                Text("T-0")
             } else {
                 Text("—")
             }
@@ -179,10 +204,101 @@ private struct CompactCountdown: View {
         .lineLimit(1)
         .minimumScaleFactor(0.75)
     }
+}
 
-    private var targetDateIsLive: Bool {
+/// Under the clock: countdowns to the next planned events, drawn by the system so they keep
+/// running between updates. Falls back to the last known stage when there is nothing to count to.
+private struct ActivityStage: View {
+    let state: StarshipFlightAttributes.ContentState
+
+    var body: some View {
+        let now = Date.now
+        let next = state.nextEvents(now: now)
+        if state.canMarkLiftoff(now: now) {
+            HStack(alignment: .center) {
+                StageText(state: state)
+                Spacer(minLength: 8)
+                Button(intent: MarkLiftoffIntent()) {
+                    Text("Liftoff")
+                        .caps(.caption2, tracking: 1.5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .overlay { Capsule().strokeBorder(.white, lineWidth: 1) }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Mark liftoff")
+            }
+        } else if next.isEmpty {
+            HStack(alignment: .firstTextBaseline) {
+                StageText(state: state)
+                Spacer(minLength: 8)
+                DetailText(state: state)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(next, id: \.self) { event in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(event.title)
+                            .caps(.caption2, color: Theme.secondary, tracking: 1.5)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        Spacer(minLength: 8)
+                        Text(timerInterval: now...event.date, countsDown: true)
+                            .font(.caption.weight(.light).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 64, alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The rail. With the plan on board each segment is a system-drawn progress bar over its own
+/// time window, so it fills through the flight without updates. The flight segments only run
+/// once liftoff is confirmed; a result or an older state falls back to fixed fills.
+private struct ActivityRail: View {
+    let state: StarshipFlightAttributes.ContentState
+    var showsLabels = true
+
+    var body: some View {
         let status = LaunchStatus(name: state.status)
-        return !status.isHoldOrTBD && !status.isSuccess && !status.isAlert
+        if let windows = state.phaseWindows, state.headline == nil, !status.isAlert, !status.isSuccess {
+            let now = Date.now
+            HStack(alignment: .top, spacing: 6) {
+                ForEach(FlightPhase.allCases, id: \.self) { phase in
+                    let window = windows.first { $0.phase == phase.rawValue }
+                    let runs = phase == .preflight || state.hasLiftedOff
+                    VStack(alignment: .leading, spacing: 5) {
+                        if let window, runs, window.start < window.end {
+                            ProgressView(timerInterval: window.start...window.end, countsDown: false) {
+                                EmptyView()
+                            } currentValueLabel: {
+                                EmptyView()
+                            }
+                            .progressViewStyle(.linear)
+                            .tint(.white)
+                        } else {
+                            Capsule()
+                                .fill(Theme.hairline)
+                                .frame(height: 3)
+                        }
+                        if showsLabels {
+                            let started = runs && (window.map { $0.start <= now } ?? false)
+                            Text(phase.rawValue)
+                                .caps(.caption2, color: started ? .white : Theme.tertiary, tracking: 1)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .accessibilityHidden(true)
+        } else {
+            PhaseRailView(fills: state.phaseFills, isAlert: status.isAlert, showsLabels: showsLabels)
+        }
     }
 }
 
@@ -190,7 +306,8 @@ private struct StageText: View {
     let state: StarshipFlightAttributes.ContentState
 
     var body: some View {
-        if let stage = state.stage {
+        // The result already fills the clock line.
+        if let stage = state.stage, stage.caseInsensitiveCompare(state.headline ?? "") != .orderedSame {
             Text(stage)
                 .caps(.caption2, color: Theme.secondary, tracking: 1.5)
                 .lineLimit(1)
@@ -231,6 +348,11 @@ extension StarshipFlightAttributes.ContentState {
 }
 
 extension StarshipFlightAttributes {
+    /// Opens the Launch tab.
+    fileprivate var url: URL? {
+        URL(string: "starshipwatcher://flight/\(flightID)")
+    }
+
     /// "Starship | Flight 15" -> "Flight 15".
     fileprivate var shortName: String {
         guard let range = flightName.range(of: " | ") else { return flightName }
@@ -256,7 +378,15 @@ extension StarshipFlightAttributes.ContentState {
             status: "Go for launch",
             targetDate: .now.addingTimeInterval(2 * 60 * 60),
             detail: "Pad 2",
-            stage: "Engine chill"
+            stage: "Engine chill",
+            liftoffConfirmed: false,
+            upcoming: [
+                StarshipFlightAttributes.Milestone(title: "Go for launch", date: .now.addingTimeInterval(2 * 60 * 60 - 30), phase: "Preflight"),
+                StarshipFlightAttributes.Milestone(title: "Liftoff", date: .now.addingTimeInterval(2 * 60 * 60), phase: "Ascent")
+            ],
+            phaseWindows: [
+                StarshipFlightAttributes.PhaseWindow(phase: "Preflight", start: .now.addingTimeInterval(-60 * 60), end: .now.addingTimeInterval(2 * 60 * 60))
+            ]
         )
     }
 }

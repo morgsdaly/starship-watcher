@@ -10,23 +10,27 @@ struct ContentView: View {
     @AppStorage("mockFlightEnabled") private var mockFlightEnabled = false
     @AppStorage("mockFlightMode") private var mockFlightMode = MockFlightMode.liftoff
     @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedTab = AppTab.launch
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             LaunchView(repository: repository, usesUTC: usesUTC)
                 .tabItem {
                     Label("Launch", systemImage: "timer")
                 }
+                .tag(AppTab.launch)
 
             FlightsView(repository: repository, usesUTC: usesUTC)
                 .tabItem {
                     Label("Flights", systemImage: "list.bullet")
                 }
+                .tag(AppTab.flights)
 
             NewsView(repository: newsRepository)
                 .tabItem {
                     Label("News", systemImage: "newspaper")
                 }
+                .tag(AppTab.news)
 
             SettingsView(
                 usesUTC: $usesUTC,
@@ -38,8 +42,13 @@ struct ContentView: View {
             .tabItem {
                 Label("Settings", systemImage: "gearshape")
             }
+            .tag(AppTab.settings)
         }
         .tint(.white)
+        // starshipwatcher://flight/<id> from the Live Activity: the countdown lives on Launch.
+        .onOpenURL { url in
+            if url.scheme == "starshipwatcher" { selectedTab = .launch }
+        }
         .task {
             await repository.refresh()
             await syncLiveActivity()
@@ -49,7 +58,7 @@ struct ContentView: View {
         .onChange(of: liveActivityEnabled) { _, enabled in
             Task {
                 #if canImport(ActivityKit)
-                if !enabled { await StarshipActivityController().endAll() }
+                if !enabled { await StarshipActivityController().endAll(includingEnded: true) }
                 #endif
                 await syncLiveActivity()
             }
@@ -63,13 +72,12 @@ struct ContentView: View {
         .onChange(of: mockFlightMode) { _, _ in
             applyMockFlight()
         }
-        .onChange(of: scenePhase) { _, phase in
-            // Covers opening from the "countdown ready" reminder or a widget tap.
-            guard phase == .active, !repository.isLoading else { return }
-            Task {
-                await repository.refresh(minInterval: 15 * 60)
-                await syncLiveActivity()
-            }
+        .task(id: scenePhase) {
+            // Restarts on every return to the foreground, which also covers opening from the
+            // "countdown ready" reminder, a widget tap, or a liftoff marked on the Lock Screen.
+            guard scenePhase == .active else { return }
+            repository.liftoffMarksChanged()
+            await pollLaunchLibrary()
         }
         .onChange(of: repository.nextFlight) { _, _ in
             Task {
@@ -87,6 +95,21 @@ struct ContentView: View {
 
     private var liveActivityMonitorID: String {
         "\(repository.nextFlight?.id ?? "none")-\(repository.nextFlight?.launchDate?.timeIntervalSince1970 ?? 0)-\(liveActivityEnabled)"
+    }
+
+    /// Runs for as long as the app is in the foreground, whichever tab is showing. Refreshes on
+    /// the flight's own schedule near launch (`pollInterval`), and lazily the rest of the time.
+    private func pollLaunchLibrary() async {
+        while !Task.isCancelled {
+            let flight = repository.nextFlight
+            let interval = flight?.pollInterval()
+            await repository.refresh(minInterval: interval.map { $0 - 10 } ?? 30 * 60)
+            guard !Task.isCancelled else { return }
+            // Push the current stage even when Launch Library data didn't change.
+            await syncLiveActivity()
+            // Outside the window, look again soon: it opens at T-3h without the flight changing.
+            try? await Task.sleep(for: .seconds(repository.nextFlight?.nextPollDelay() ?? 5 * 60))
+        }
     }
 
     private func applyMockFlight() {
@@ -125,6 +148,10 @@ struct ContentView: View {
         await syncLiveActivity()
         #endif
     }
+}
+
+private enum AppTab {
+    case launch, flights, news, settings
 }
 
 #Preview {

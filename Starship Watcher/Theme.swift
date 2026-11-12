@@ -75,9 +75,11 @@ enum Countdown {
     /// afterwards so an in-flight mission never freezes at zero.
     static func text(to target: Date?, now: Date, compact: Bool = false) -> String {
         guard let target else { return "TBD" }
-        let interval = target.timeIntervalSince(now)
-        let sign = interval >= 0 ? "T-" : "T+"
-        let remaining = abs(Int(interval))
+        // Nearest second: with ticks aligned to the target (`tickAnchor`) every value shows for
+        // exactly one second, where truncating held 00:00:00 for two.
+        let seconds = Int(target.timeIntervalSince(now).rounded())
+        let sign = seconds > 0 ? "T-" : "T+"
+        let remaining = abs(seconds)
         let days = remaining / 86_400
         let hours = remaining / 3_600 % 24
         let minutes = remaining / 60 % 60
@@ -91,9 +93,17 @@ enum Countdown {
         return String(format: "%@%02d:%02d:%02d", sign, hours, minutes, seconds)
     }
 
+    /// Start date for a once-a-second schedule whose ticks land on whole seconds of `target`,
+    /// so the clock changes at the same instant as the webcast's rather than up to a second late.
+    static func tickAnchor(for target: Date?, now: Date = .now) -> Date {
+        guard let target else { return now }
+        let offset = target.timeIntervalSince(now)
+        return now.addingTimeInterval(offset - offset.rounded(.up) - 1)
+    }
+
     /// "04:12" or "2:04:12" under a day out. Nil once passed or further away.
     static func remaining(to target: Date, now: Date) -> String? {
-        let total = Int(target.timeIntervalSince(now))
+        let total = Int(target.timeIntervalSince(now).rounded())
         guard total >= 0, total < 86_400 else { return nil }
         return total < 3_600
             ? String(format: "%02d:%02d", total / 60, total % 60)

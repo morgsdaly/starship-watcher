@@ -35,6 +35,61 @@ extension StarshipFlight {
         return now >= launchDate.addingTimeInterval(-3 * 60 * 60) && now <= launchDate.addingTimeInterval(2 * 60 * 60)
     }
 
+    /// How often to ask Launch Library while the app is open. Nil outside the active window.
+    /// The free tier allows ~15 requests/hour, so the budget goes where a minute matters:
+    /// every 60s from T-2m until liftoff is confirmed (or T+6m), sparse in the hour either side.
+    func pollInterval(now: Date = .now) -> TimeInterval? {
+        guard isInActiveWindow(now: now), let launchDate else { return nil }
+        if status.isFinal { return 15 * 60 }
+        if status.confirmsLiftoff { return 5 * 60 }
+        let sinceNET = now.timeIntervalSince(launchDate)
+        if sinceNET >= -Self.burstLead, sinceNET <= 6 * 60 { return 60 }
+        return abs(sinceNET) <= 60 * 60 ? 12 * 60 : 6 * 60
+    }
+
+    /// Seconds to wait before the next poll: the interval, cut short so the burst starts on time.
+    func nextPollDelay(now: Date = .now) -> TimeInterval? {
+        guard let interval = pollInterval(now: now), let launchDate else { return nil }
+        let untilBurst = launchDate.addingTimeInterval(-Self.burstLead).timeIntervalSince(now)
+        return untilBurst > 0 ? min(interval, untilBurst) : interval
+    }
+
+    private static let burstLead: TimeInterval = 2 * 60
+
+    /// The viewer can call liftoff from a minute before NET until the status catches up.
+    func canMarkLiftoff(now: Date = .now) -> Bool {
+        guard hasFirmDate, !isMock, !status.confirmsLiftoff, let launchDate else { return false }
+        return now >= launchDate.addingTimeInterval(-60) && isInActiveWindow(now: now)
+    }
+
+    /// From T-10m to the last planned event the screen stays on: nobody wants to unlock at Max Q.
+    func keepsScreenAwake(now: Date = .now) -> Bool {
+        guard hasFirmDate, !status.isFinal, !status.isHoldOrTBD, let launchDate else { return false }
+        let end = hasLiftedOff(now: now)
+            ? (timeline.compactMap(\.targetDate).max() ?? launchDate).addingTimeInterval(2 * 60)
+            : launchDate.addingTimeInterval(15 * 60)
+        return now >= launchDate.addingTimeInterval(-10 * 60) && now <= end
+    }
+
+    /// "Window closes 9:30 PM", or a live "Window closes in 42:10" once NET has passed without
+    /// liftoff. Nil for an instantaneous window, a soft date, or after liftoff.
+    func windowText(now: Date, usesUTC: Bool) -> String? {
+        guard hasFirmDate, !status.confirmsLiftoff, let launchDate, let windowEnd,
+              windowEnd.timeIntervalSince(launchDate) >= 60 else { return nil }
+        if now >= launchDate {
+            guard let remaining = Countdown.remaining(to: windowEnd, now: now) else { return "Window closed" }
+            return "Window closes in \(remaining)"
+        }
+        let style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current).hour().minute()
+        return "Window closes \(windowEnd.formatted(style))" + (usesUTC ? " UTC" : "")
+    }
+
+    /// Other streams once the launch is close: independent commentary alongside the official feed.
+    func otherStreams(now: Date = .now) -> [FlightStream] {
+        guard isInActiveWindow(now: now), let streams else { return [] }
+        return streams.filter { $0.url != webcastURL }
+    }
+
     func isLive(now: Date = .now) -> Bool {
         webcastLive && isInActiveWindow(now: now)
     }
@@ -102,7 +157,9 @@ extension StarshipFlight {
 
 extension Date {
     func launchText(usesUTC: Bool, year: Bool = false) -> String {
-        var style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current).month(.abbreviated).day().hour().minute()
+        // The weekday matters far from the pad: launch day in Texas is often tomorrow elsewhere.
+        var style = Date.FormatStyle(timeZone: usesUTC ? .gmt : .current)
+            .weekday(.abbreviated).month(.abbreviated).day().hour().minute()
         if year { style = style.year() }
         return formatted(style) + (usesUTC ? " UTC" : "")
     }

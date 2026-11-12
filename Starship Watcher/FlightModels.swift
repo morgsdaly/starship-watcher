@@ -6,8 +6,8 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     let missionName: String
     let summary: String
     let vehicle: String
-    let status: LaunchStatus
-    let launchDate: Date?
+    var status: LaunchStatus
+    var launchDate: Date?
     let windowStart: Date?
     let windowEnd: Date?
     let launchSite: String
@@ -29,6 +29,8 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     /// Editors' notes on this flight, newest first.
     var updates: [FlightUpdate]? = nil
     var failureReason: String? = nil
+    /// Every stream Launch Library lists, best first.
+    var streams: [FlightStream]? = nil
 
     var isUpcoming: Bool {
         guard let launchDate else { return true }
@@ -65,12 +67,11 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
         }
     }
 
-    /// Liftoff confirmed by status, or webcast live past NET while still Go. Holds and TBD never count,
+    /// Liftoff confirmed by Launch Library's status or the viewer's own mark (`ManualLiftoff`).
+    /// NET passing proves nothing: Starship often holds in the last minute and the status lags,
     /// so the timeline waits at the last pre-launch event instead of running on the device clock.
     func hasLiftedOff(now: Date) -> Bool {
-        if status.confirmsLiftoff { return true }
-        guard !status.isHoldOrTBD, webcastLive, let launchDate else { return false }
-        return now >= launchDate
+        status.confirmsLiftoff
     }
 
     /// The latest event reached: past its target time and, after T0, only once liftoff is confirmed.
@@ -92,7 +93,8 @@ extension Array where Element == StarshipFlight {
     var nextFlight: StarshipFlight? {
         filter(\.isUpcoming)
             .sorted { ($0.launchDate ?? .distantFuture) < ($1.launchDate ?? .distantFuture) }
-            .first
+            .first?
+            .applyingManualLiftoff()
     }
 }
 
@@ -138,6 +140,11 @@ struct LaunchStatus: Codable, Hashable {
         return value.contains("success") || value.contains("deployed")
     }
 
+    /// The flight is over, one way or the other.
+    var isFinal: Bool {
+        isSuccess || name.lowercased().contains("fail")
+    }
+
     /// Any scrub or failure. Holds stay white.
     var isAlert: Bool {
         let value = name.lowercased()
@@ -154,6 +161,12 @@ struct FlightVehicle: Codable, Hashable {
     let landingSummary: String?
     /// Nil until a landing attempt has an outcome.
     let landingSucceeded: Bool?
+}
+
+struct FlightStream: Codable, Hashable {
+    /// "SpaceX", "NASASpaceflight", or the site when no publisher is listed.
+    let name: String
+    let url: URL
 }
 
 struct FlightUpdate: Codable, Hashable {
@@ -200,6 +213,8 @@ struct FlightEvent: Identifiable, Codable, Hashable {
             (2 * 60 + 24, "Hot staging", .ascent),
             (2 * 60 + 30, "Boostback burn", .booster),
             (6 * 60 + 34, "Booster landing burn", .booster),
+            // Catch or splashdown, so the booster lane ends on its outcome rather than a burn starting.
+            (6 * 60 + 54, "Booster landing", .booster),
             (8 * 60 + 11, "Ship engine cutoff", .ship),
             (47 * 60 + 47, "Ship reentry", .ship),
             (65 * 60 + 8, "Landing flip", .ship),

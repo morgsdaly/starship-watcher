@@ -57,9 +57,11 @@
 				FlightDisplay.swift,
 				FlightModels.swift,
 				LaunchLibraryClient.swift,
+				ManualLiftoff.swift,
 				MissionProgress.swift,
 				MockFlight.swift,
 				SharedAppGroup.swift,
+				StarshipFlightAttributes.swift,
 				Theme.swift,
 			);
 			target = ECFE078E3010C372002BFC39 /* WidgetExtensionExtension */;

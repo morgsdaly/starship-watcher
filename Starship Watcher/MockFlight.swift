@@ -2,14 +2,14 @@ import Foundation
 
 /// Where a mock flight starts on the timeline.
 enum MockFlightMode: String, CaseIterable, Identifiable {
-    case eightHoursOut
+    case tenMinutesOut
     case liftoff
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .eightHoursOut: "T-8h"
+        case .tenMinutesOut: "T-10m"
         case .liftoff: "Liftoff"
         }
     }
@@ -17,7 +17,8 @@ enum MockFlightMode: String, CaseIterable, Identifiable {
     /// Time until T0. Liftoff keeps a few seconds of Go, so the status change and alert still fire.
     fileprivate var lead: TimeInterval {
         switch self {
-        case .eightHoursOut: 8 * 60 * 60
+        // Long enough to watch the count, short enough to reach the flight in one sitting.
+        case .tenMinutesOut: 10 * 60
         case .liftoff: 10
         }
     }

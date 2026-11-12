@@ -4,6 +4,8 @@ import SwiftUI
 struct StageTracker: View {
     let flight: StarshipFlight
     let now: Date
+    /// When Launch Library was last asked. Shown near launch, where trust depends on freshness.
+    var checked: Date? = nil
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -13,11 +15,13 @@ struct StageTracker: View {
             HStack {
                 Text("Stage").caps(color: Theme.secondary)
                 Spacer()
-                Text("Estimated").caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+                Text("Planned times").caps(.caption2, color: Theme.tertiary, tracking: 1.5)
             }
 
             Text(progress.title)
                 .caps(.title3.weight(.light), color: progress.isAlert ? Theme.alert : .white, tracking: 3)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.4), value: progress.title)
 
             PhaseRail(progress: progress, showsLabels: !typeSize.isAccessibilitySize)
 
@@ -28,11 +32,25 @@ struct StageTracker: View {
                     }
                 }
             }
+
+            if let checked {
+                Text("Status checked \(Self.ageText(since: checked, now: now))")
+                    .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // One tap on the wrist per event. Nothing for refreshes.
+        .sensoryFeedback(.impact(weight: .medium), trigger: progress.title)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Estimated stage: \(progress.title)")
         .accessibilityValue(progress.upcoming.map { "Next: \($0.title)" }.joined(separator: ". "))
+    }
+}
+
+extension StageTracker {
+    fileprivate static func ageText(since date: Date, now: Date) -> String {
+        let minutes = Int(now.timeIntervalSince(date) / 60)
+        return minutes < 1 ? "just now" : "\(minutes) min ago"
     }
 }
 
@@ -54,6 +72,7 @@ private struct PhaseRail: View {
                             Rectangle()
                                 .fill(progress.isAlert ? Theme.alert : .white)
                                 .scaleEffect(x: fill, y: 1, anchor: .leading)
+                                .animation(.linear(duration: 1), value: fill)
                         }
                     if showsLabels {
                         Text(phase.rawValue)

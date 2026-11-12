@@ -22,8 +22,11 @@ enum BackgroundRefresh {
         schedule()
 
         let repository = FlightRepository()
+        let before = repository.nextFlight
         await repository.refresh(minInterval: 15 * 60)
         guard !Task.isCancelled else { return }
+
+        await NotificationScheduler().notifyChange(from: before, to: repository.nextFlight)
 
         #if canImport(ActivityKit)
         await StarshipActivityController().sync(flight: repository.nextFlight, canStart: false)
