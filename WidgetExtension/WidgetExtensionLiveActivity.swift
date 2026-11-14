@@ -16,13 +16,8 @@ struct WidgetExtensionLiveActivity: Widget {
             let status = LaunchStatus(name: context.state.status)
             return DynamicIsland {
                 // The regions either side of the camera are narrow and cut by its housing, so they
-                // carry only the ship and one status word. The name sits below, where there is room.
-                DynamicIslandExpandedRegion(.leading) {
-                    StarshipMark(color: status.markColor, glows: false)
-                        .frame(height: 28)
-                        .padding(.leading, 12)
-                        .padding(.top, 2)
-                }
+                // carry only one status word. No ship: the island's edge smudges it and the clock
+                // already says what this is. The name sits below, where there is room.
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(status.shortName)
                         .caps(.caption, color: status.color, tracking: 1.5)
@@ -149,8 +144,8 @@ private struct CompactStatus: View {
         } else {
             // No glow here: the island's edge clips it into a smudge.
             StarshipMark(color: status.markColor, glows: false)
-                .frame(height: 20)
-                .padding(.leading, 6)
+                .frame(height: 18)
+                .padding(.leading, 8)
         }
     }
 }
