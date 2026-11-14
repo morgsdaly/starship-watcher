@@ -45,10 +45,19 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     /// Lifted off, no result yet, and not long past the last planned event. Launch Library only
     /// gives a result once the whole flight is over, which can be T+22h for a ship catch.
     func isFlying(now: Date) -> Bool {
-        guard hasLiftedOff(now: now), !status.isFinal, let launchDate else { return false }
-        let lastEvent = timeline.compactMap(\.targetDate).max() ?? launchDate
-        return now <= max(lastEvent, launchDate).addingTimeInterval(2 * 60 * 60)
+        guard hasLiftedOff(now: now), !status.isFinal, let plannedEnd else { return false }
+        return now <= plannedEnd.addingTimeInterval(2 * 60 * 60)
     }
+
+    /// The last planned event, capped at T+48h so a bad offset in the feed can't keep a flight
+    /// live (polling, screen awake) for weeks.
+    var plannedEnd: Date? {
+        guard let launchDate else { return nil }
+        let lastEvent = timeline.compactMap(\.targetDate).max() ?? launchDate
+        return min(max(lastEvent, launchDate), launchDate.addingTimeInterval(Self.maxFlightDuration))
+    }
+
+    static let maxFlightDuration: TimeInterval = 48 * 60 * 60
 
     /// Worth a ticking clock: confirmed Go, already flown, or an exact time with a date set.
     /// "To Be Confirmed" ticks only with a minute-precise time: SpaceX counts down to that target

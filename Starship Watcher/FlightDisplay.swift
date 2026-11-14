@@ -69,7 +69,7 @@ extension StarshipFlight {
     func keepsScreenAwake(now: Date = .now) -> Bool {
         guard hasFirmDate, !status.isFinal, !status.isHoldOrTBD, let launchDate else { return false }
         let end = hasLiftedOff(now: now)
-            ? (timeline.compactMap(\.targetDate).max() ?? launchDate).addingTimeInterval(2 * 60)
+            ? (plannedEnd ?? launchDate).addingTimeInterval(2 * 60)
             : launchDate.addingTimeInterval(15 * 60)
         return now >= launchDate.addingTimeInterval(-10 * 60) && now <= end
     }
