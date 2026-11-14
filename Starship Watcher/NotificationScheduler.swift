@@ -42,7 +42,8 @@ struct NotificationScheduler {
             schedule(title: "Starship launch in \(hours) hour\(hours == 1 ? "" : "s")", body: "Tap to pin the \(flight.shortName) countdown to your Lock Screen.", date: flight.launchDate?.addingTimeInterval(-liveLead), identifier: "\(flight.id)-live")
         }
         // Not `windowStart`: for Starship it usually equals NET, so the reminder landed at liftoff.
-        if Self.allows("reminderWebcast") {
+        // Already streaming: the "starting soon" reminder would arrive after the fact.
+        if Self.allows("reminderWebcast"), !flight.webcastLive {
             schedule(title: "Starship webcast starting soon", body: "\(flight.shortName) launches in about 30 minutes.", date: flight.launchDate?.addingTimeInterval(-30 * 60), identifier: "\(flight.id)-stream")
         }
     }
@@ -61,6 +62,27 @@ struct NotificationScheduler {
         content.sound = .default
         try? await center.add(UNNotificationRequest(identifier: "\(new.id)-change-\(Date.now.timeIntervalSince1970)", content: content, trigger: nil))
     }
+
+    /// Tells the user when a background refresh finds the webcast has gone live. Fires even while the
+    /// Live Activity is up: it doesn't alert for the stream. Once per flight, as Launch Library's flag can flicker.
+    func notifyWebcastLive(from old: StarshipFlight?, to new: StarshipFlight?) async {
+        guard Self.isEnabled, Self.allows("reminderWebcast"), let old, let new, old.id == new.id,
+              !old.webcastLive, new.isLive(), !new.status.confirmsLiftoff, !new.status.isFinal else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: Self.webcastNotifiedKey) != new.id else { return }
+        let center = UNUserNotificationCenter.current()
+        guard await center.notificationSettings().authorizationStatus == .authorized else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Starship webcast is live"
+        content.body = "\(new.shortName) coverage has started."
+        content.sound = .default
+        center.removePendingNotificationRequests(withIdentifiers: ["\(new.id)-stream"])
+        try? await center.add(UNNotificationRequest(identifier: "\(new.id)-live-now", content: content, trigger: nil))
+        defaults.set(new.id, forKey: Self.webcastNotifiedKey)
+    }
+
+    private static let webcastNotifiedKey = "webcastLiveNotifiedFlight"
 
     /// Slips smaller than this aren't news: Launch Library nudges NET often on launch day.
     private static let slipThreshold: TimeInterval = 15 * 60

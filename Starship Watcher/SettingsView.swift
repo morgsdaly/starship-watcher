@@ -23,7 +23,7 @@ struct SettingsView: View {
                         Group {
                             Toggle("The day before", isOn: $reminderDayBefore)
                             Toggle("Countdown ready to pin", isOn: $reminderCountdown)
-                            Toggle("30 minutes before", isOn: $reminderWebcast)
+                            Toggle("Webcast: 30 min before and when live", isOn: $reminderWebcast)
                             Toggle("New dates, holds and results", isOn: $reminderChanges)
                         }
                         .padding(.leading, 16)
