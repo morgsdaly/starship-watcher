@@ -7,18 +7,27 @@ enum BackgroundRefresh {
     static let identifier = "com.morgandaly.Starship-Watcher.refresh"
 
     static func schedule() {
-        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
-        let request = BGAppRefreshTaskRequest(identifier: identifier)
-        request.earliestBeginDate = .now.addingTimeInterval(nextInterval(launchDate: FlightRepository().nextFlight?.launchDate))
-        try? BGTaskScheduler.shared.submit(request)
+        let identifier = identifier
+        let earliestBeginDate = Date.now.addingTimeInterval(nextInterval(launchDate: FlightRepository().nextFlight?.launchDate))
+        // The async submit API must not be called on the main thread.
+        Task.detached(priority: .utility) {
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+            let request = BGAppRefreshTaskRequest(identifier: identifier)
+            request.earliestBeginDate = earliestBeginDate
+            try? await BGTaskScheduler.shared.submitTaskRequest(request)
+        }
     }
 
     static func run() async {
         schedule()
 
         let repository = FlightRepository()
+        let before = repository.nextFlight
         await repository.refresh(minInterval: 15 * 60)
         guard !Task.isCancelled else { return }
+
+        await NotificationScheduler().notifyChange(from: before, to: repository.nextFlight)
+        await NotificationScheduler().notifyWebcastLive(from: before, to: repository.nextFlight)
 
         #if canImport(ActivityKit)
         await StarshipActivityController().sync(flight: repository.nextFlight, canStart: false)

@@ -1,9 +1,13 @@
 import SwiftUI
+import UIKit
 
 /// The next flight: a full-screen hero over its photo, then mission text and the sequence on black.
 struct LaunchView: View {
     let repository: FlightRepository
     let usesUTC: Bool
+
+    @State private var shareCard: UIImage?
+    @State private var showsCalendar = false
 
     private var flight: StarshipFlight? {
         repository.nextFlight
@@ -22,18 +26,40 @@ struct LaunchView: View {
             .toolbar {
                 if let flight {
                     ToolbarItem(placement: .topBarTrailing) {
-                        ShareLink(item: flight.shareText) {
+                        Menu {
+                            if let shareCard {
+                                let image = Image(uiImage: shareCard)
+                                ShareLink(item: image, preview: SharePreview(flight.shortName, image: image)) {
+                                    Label("Share card", systemImage: "photo")
+                                }
+                            }
+                            ShareLink(item: flight.shareText) {
+                                Label("Share details", systemImage: "text.alignleft")
+                            }
+                            if flight.hasFirmDate, !flight.status.confirmsLiftoff, !flight.isMock {
+                                Button {
+                                    showsCalendar = true
+                                } label: {
+                                    Label("Add to Calendar", systemImage: "calendar.badge.plus")
+                                }
+                            }
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                         .accessibilityLabel("Share flight")
                     }
                 }
             }
-            .refreshingToolbar(isLoading: repository.isLoading)
-            .sensoryFeedback(.success, trigger: repository.lastUpdated)
-            .task(id: flight?.id) {
-                await refreshDuringActiveWindow()
+            .task(id: flight) {
+                shareCard = flight?.shareCardImage(usesUTC: usesUTC)
             }
+            .sheet(isPresented: $showsCalendar) {
+                if let flight {
+                    CalendarEventSheet(flight: flight)
+                        .ignoresSafeArea()
+                }
+            }
+            .refreshingToolbar(isLoading: repository.isLoading)
         }
     }
 
@@ -47,10 +73,18 @@ struct LaunchView: View {
                     // At least a full screen, and taller when large text needs it.
                     ZStack(alignment: .bottomLeading) {
                         Color.clear.containerRelativeFrame(.vertical)
-                        LaunchHero(flight: flight, usesUTC: usesUTC)
+                        LaunchHero(flight: flight, repository: repository, usesUTC: usesUTC)
+                    }
+                    // The hero fills the screen, so say there is more below it.
+                    .overlay(alignment: .bottom) {
+                        Image(systemName: "chevron.compact.down")
+                            .font(.title3)
+                            .foregroundStyle(Theme.tertiary)
+                            .padding(.bottom, 4)
+                            .accessibilityHidden(true)
                     }
 
-                    LaunchDetails(flight: flight, repository: repository)
+                    LaunchDetails(flight: flight, repository: repository, usesUTC: usesUTC)
                 }
             }
             .scrollIndicators(.hidden)
@@ -64,69 +98,97 @@ struct LaunchView: View {
         }
     }
 
-    private func refreshDuringActiveWindow() async {
-        while !Task.isCancelled, flight?.isInActiveWindow() ?? false {
-            // Every 6 min keeps this under Launch Library's ~15 requests/hour.
-            try? await Task.sleep(for: .seconds(6 * 60))
-            if !Task.isCancelled {
-                await repository.refresh(minInterval: 5 * 60)
-                // Push the current stage even when Launch Library data didn't change.
-                #if canImport(ActivityKit)
-                await StarshipActivityController().sync(flight: repository.nextFlight, canStart: false)
-                #endif
-            }
-        }
-    }
 }
 
 private struct LaunchHero: View {
     let flight: StarshipFlight
+    let repository: FlightRepository
     let usesUTC: Bool
 
     @Environment(\.openURL) private var openURL
     @ScaledMetric(relativeTo: .largeTitle) private var clockSize: CGFloat = 46
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        // Ticks land on whole seconds of the countdown, in step with the webcast clock.
+        TimelineView(.periodic(from: Countdown.tickAnchor(for: flight.launchDate), by: 1)) { timeline in
             let now = timeline.date
             VStack(alignment: .leading, spacing: 18) {
                 Text(flight.shortName)
-                    .caps(.title3.weight(.light), tracking: 4)
+                    .caps(.title3.weight(.bold), tracking: 4)
 
-                Text(clockText(now: now))
-                    .font(.system(size: clockSize, weight: .light).monospacedDigit())
-                    .textCase(.uppercase)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.4)
+                ExplainerButton(explainer: flight.clockExplainer) {
+                    Text(clockText(now: now))
+                        .font(.system(size: clockSize, weight: .light).monospacedDigit())
+                        .textCase(.uppercase)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
+                        // Digits roll rather than snap: down before liftoff, up after.
+                        .contentTransition(.numericText(countsDown: !flight.hasLiftedOff(now: now)))
+                        .animation(.snappy(duration: 0.3), value: clockText(now: now))
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 14) {
-                        Text(flight.status.displayName)
-                            .caps(color: flight.status.color)
+                        ExplainerButton(explainer: flight.status.explainer) {
+                            Text(flight.status.displayName)
+                                .caps(color: flight.status.color)
+                        }
                         if flight.isLive(now: now) {
                             Text("● Live").caps(color: Theme.alert)
                         }
                     }
-                    Text(flight.hasFirmDate ? "\(flight.dateText(usesUTC: usesUTC)) · \(flight.placeText)" : flight.placeText)
+                    Text([flight.relativeDay(now: now), flight.hasFirmDate ? flight.dateText(usesUTC: usesUTC) : nil, flight.placeText]
+                        .compactMap { $0 }
+                        .joined(separator: " · "))
                         .caps(.caption, color: Theme.secondary, tracking: 1.5)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let windowText = flight.windowText(now: now, usesUTC: usesUTC) {
+                        Text(windowText)
+                            .caps(.caption, color: Theme.secondary, tracking: 1.5)
+                            .monospacedDigit()
+                    }
+                    // Up here, not at the foot of the page: stale data changes how to read the clock.
+                    if let errorMessage = repository.errorMessage {
+                        NoticeText(message: errorMessage)
+                    }
                 }
 
                 if flight.isInActiveWindow(now: now) {
-                    StageTracker(flight: flight, now: now)
+                    StageTracker(flight: flight, now: now, checked: flight.isMock ? nil : repository.lastUpdated)
                         .padding(.top, 6)
                 }
 
+                LiftoffMark(flight: flight, repository: repository, now: now)
+
                 if let streamURL = flight.liveStreamURL(now: now) {
-                    Button("Watch Live") { openURL(streamURL) }
-                        .buttonStyle(OutlineButtonStyle())
-                        .padding(.top, 6)
+                    HStack(spacing: 20) {
+                        Button("Watch Live") { openURL(streamURL) }
+                            .buttonStyle(OutlineButtonStyle())
+                        let others = flight.otherStreams(now: now)
+                        if !others.isEmpty {
+                            Menu {
+                                ForEach(others, id: \.self) { stream in
+                                    Button(stream.name) { openURL(stream.url) }
+                                }
+                            } label: {
+                                Text("Other streams").caps(.caption, color: Theme.secondary, tracking: 1.5)
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
                 }
+            }
+            .onChange(of: flight.keepsScreenAwake(now: now), initial: true) { _, keepsAwake in
+                UIApplication.shared.isIdleTimerDisabled = keepsAwake
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Theme.gutter)
         .padding(.bottom, 28)
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        // The moment itself, whether Launch Library or the viewer called it.
+        .sensoryFeedback(.success, trigger: flight.status.confirmsLiftoff)
         .accessibilityElement(children: .contain)
     }
 
@@ -139,9 +201,82 @@ private struct LaunchHero: View {
     }
 }
 
+/// The viewer's own liftoff call. Launch Library's status can trail the pad by minutes, and the
+/// app never assumes liftoff from the clock, so this is the fastest way to start the mission timer.
+private struct LiftoffMark: View {
+    let flight: StarshipFlight
+    let repository: FlightRepository
+    let now: Date
+
+    var body: some View {
+        if flight.canMarkLiftoff(now: now) {
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Mark liftoff") { repository.markLiftoff() }
+                    .buttonStyle(OutlineButtonStyle())
+                Text("Tap as it leaves the pad to start the mission clock.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
+            }
+            .padding(.top, 6)
+        } else if flight.hasManualLiftoff {
+            Button { repository.clearLiftoffMark() } label: {
+                Text("Liftoff marked by you · Undo")
+                    .caps(.caption2, color: Theme.secondary, tracking: 1.5)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Tap for a short explanation of a term. Shows the label alone when there's nothing to explain.
+private struct ExplainerButton<Label: View>: View {
+    let explainer: Explainer?
+    @ViewBuilder let label: Label
+
+    @State private var isShowing = false
+
+    var body: some View {
+        if let explainer {
+            Button { isShowing = true } label: {
+                // The glyph says the term can be tapped.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    label
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(Theme.tertiary)
+                        .accessibilityHidden(true)
+                }
+            }
+                .buttonStyle(.plain)
+                .accessibilityHint("Explains this term")
+                .popover(isPresented: $isShowing) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(explainer.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Text(explainer.message)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 260, alignment: .leading)
+                    .padding(16)
+                    // Solid, so the photo and hero text can't show through.
+                    .presentationBackground(.black)
+                    .presentationCompactAdaptation(.popover)
+                }
+        } else {
+            label
+        }
+    }
+}
+
 private struct LaunchDetails: View {
     let flight: StarshipFlight
     let repository: FlightRepository
+    let usesUTC: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -158,16 +293,17 @@ private struct LaunchDetails: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                LaunchWeatherSection(flight: flight)
+
+                FlightFacts(flight: flight, usesUTC: usesUTC, allFlights: repository.flights)
+
+                CampaignSection(events: repository.campaignEvents, usesUTC: usesUTC)
+
                 SequenceList(flight: flight)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    if let errorMessage = repository.errorMessage {
-                        NoticeText(message: errorMessage)
-                    }
-                    if let lastUpdated = repository.lastUpdated {
-                        Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                            .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
-                    }
+                if let lastUpdated = repository.lastUpdated {
+                    Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                        .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
                 }
             }
             .padding(.horizontal, Theme.gutter)
@@ -180,13 +316,13 @@ private struct LaunchDetails: View {
     }
 }
 
-/// Template offsets from recent flights, not live data, hence "Typical timeline".
+/// Planned offsets, never live data: the flight's published sequence or, without one, a template.
 /// The tracker sits here until launch nears, then moves up into the hero.
 private struct SequenceList: View {
     let flight: StarshipFlight
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        TimelineView(.periodic(from: Countdown.tickAnchor(for: flight.launchDate), by: 1)) { timeline in
             let events = flight.timeline
             // A placeholder date passing proves nothing, so soft dates mark no progress.
             let current = flight.hasFirmDate ? flight.currentEventIndex(in: events, now: timeline.date) : nil
@@ -199,7 +335,8 @@ private struct SequenceList: View {
                     HStack {
                         Text("Sequence").caps(color: Theme.secondary)
                         Spacer()
-                        Text("Typical timeline").caps(.caption2, color: Theme.tertiary, tracking: 1.5)
+                        Text(flight.hasPublishedTimeline ? "Planned timeline" : "Typical timeline")
+                            .caps(.caption2, color: Theme.tertiary, tracking: 1.5)
                     }
 
                     VStack(spacing: 0) {
@@ -243,10 +380,18 @@ private struct SequenceRow: View {
     }
 }
 
-/// Fixed flight photo, darkened for the hero text. Plain black when there is no image.
+/// Fixed flight photo, darkened for the hero text. A flight without a photo keeps the last one
+/// shown; plain black only when there has never been one.
 private struct HeroPhoto: View {
     let imageURL: URL?
     @State private var image: UIImage?
+
+    init(imageURL: URL?) {
+        self.imageURL = imageURL
+        // Seed from the memory/disk cache so a known photo is there on the first frame.
+        let url = imageURL ?? BackdropImageLoader.lastShownURL
+        _image = State(initialValue: url.flatMap { BackdropImageLoader.shared.cachedImage(for: $0) })
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -272,15 +417,16 @@ private struct HeroPhoto: View {
         }
         .accessibilityHidden(true)
         .task(id: imageURL) {
-            guard let imageURL else {
-                image = nil
-                return
-            }
-            if let cached = BackdropImageLoader.shared.cachedImage(for: imageURL) {
+            // No photo for this flight: keep the last one shown.
+            guard let url = imageURL ?? BackdropImageLoader.lastShownURL else { return }
+            if let cached = BackdropImageLoader.shared.cachedImage(for: url) {
                 image = cached
+                BackdropImageLoader.lastShownURL = url
                 return
             }
-            let loaded = await BackdropImageLoader.shared.image(for: imageURL)
+            // A failed download also keeps the current photo rather than going black.
+            guard let loaded = await BackdropImageLoader.shared.image(for: url) else { return }
+            BackdropImageLoader.lastShownURL = url
             withAnimation(.easeOut(duration: 0.4)) { image = loaded }
         }
     }

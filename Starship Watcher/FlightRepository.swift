@@ -9,6 +9,10 @@ final class FlightRepository {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var lastUpdated: Date?
+    /// Takes over as next flight. Kept out of `flights`, so real data and its cache stay untouched.
+    private(set) var mockFlight: StarshipFlight?
+    /// Upcoming static fires, rollouts and other tests. Empty when Launch Library lists none.
+    private(set) var campaignEvents: [CampaignEvent] = []
 
     private let client: LaunchLibraryClient
 
@@ -17,6 +21,11 @@ final class FlightRepository {
         if let cached = FlightCache.load() {
             flights = cached.flights
             lastUpdated = cached.lastUpdated
+        }
+        mockFlight = MockFlight.current()
+        if let data = UserDefaults.standard.data(forKey: Self.campaignEventsKey),
+           let events = try? JSONDecoder.starship.decode([CampaignEvent].self, from: data) {
+            campaignEvents = events.filter { $0.date > .now }
         }
     }
 
@@ -27,7 +36,37 @@ final class FlightRepository {
     }
 
     var nextFlight: StarshipFlight? {
-        flights.nextFlight
+        // The liftoff mark lives in UserDefaults; reading this makes views follow it.
+        _ = liftoffMarkRevision
+        return mockFlight ?? flights.nextFlight
+    }
+
+    private var liftoffMarkRevision = 0
+
+    /// The viewer saw it leave the pad: start the mission clock now, ahead of Launch Library.
+    func markLiftoff(at date: Date = .now) {
+        guard let flight = nextFlight, flight.canMarkLiftoff(now: date) else { return }
+        ManualLiftoff.mark(flightID: flight.id, at: date)
+        liftoffMarksChanged()
+    }
+
+    func clearLiftoffMark() {
+        ManualLiftoff.clear()
+        liftoffMarksChanged()
+    }
+
+    /// Also picks up a mark made from the Live Activity while the app was in the background.
+    func liftoffMarksChanged() {
+        liftoffMarkRevision += 1
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Picks up a mock starting, stopping or changing status with the clock.
+    func updateMockFlight() {
+        let current = MockFlight.current()
+        guard current != mockFlight else { return }
+        mockFlight = current
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     var pastFlights: [StarshipFlight] {
@@ -40,6 +79,8 @@ final class FlightRepository {
     /// refresh and the start-countdown intent. Skips the network if the last attempt (from any of
     /// those) was within `minInterval`, or while backing off after a 429.
     func refresh(minInterval: TimeInterval = 10 * 60) async {
+        updateMockFlight()
+
         let defaults = UserDefaults.standard
         let now = Date.now
         if let cooldown = defaults.object(forKey: Self.cooldownKey) as? Date, cooldown > now { return }
@@ -56,7 +97,13 @@ final class FlightRepository {
             guard let launchDate = flight.launchDate else { return false }
             return launchDate > lastPreviousFetch && launchDate < now
         }
-        let includePrevious = launchedSinceFetch || now.timeIntervalSince(lastPreviousFetch) > 6 * 60 * 60 || lastUpdated == nil
+        // Not around liftoff, though: the second request would come out of the once-a-minute budget.
+        let nearLiftoff = flights.contains { flight in
+            guard let launchDate = flight.launchDate else { return false }
+            return abs(launchDate.timeIntervalSince(now)) < 20 * 60
+        }
+        let includePrevious = lastUpdated == nil
+            || (!nearLiftoff && (launchedSinceFetch || now.timeIntervalSince(lastPreviousFetch) > 6 * 60 * 60))
 
         do {
             let fetchedFlights = try await client.fetchStarshipFlights(includePrevious: includePrevious)
@@ -75,6 +122,12 @@ final class FlightRepository {
             flights = merged
             lastUpdated = .now
             saveCachedFlights(merged)
+            // Tests are scheduled days ahead, so they ride along with the slow refresh. A failure
+            // here keeps the last list and never counts against the flights.
+            if includePrevious, let events = try? await client.fetchCampaignEvents() {
+                campaignEvents = events.filter { $0.date > .now }
+                defaults.set(try? JSONEncoder.starship.encode(campaignEvents), forKey: Self.campaignEventsKey)
+            }
         } catch LaunchLibraryError.rateLimited(let retryAfter) {
             defaults.set(now.addingTimeInterval(retryAfter ?? 15 * 60), forKey: Self.cooldownKey)
             errorMessage = "Launch Library rate limit reached. Showing saved data."
@@ -86,6 +139,7 @@ final class FlightRepository {
     private static let lastAttemptKey = "launchDataLastAttempt"
     private static let lastPreviousFetchKey = "launchDataLastPreviousFetch"
     private static let cooldownKey = "launchDataCooldownUntil"
+    private static let campaignEventsKey = "campaignEvents"
 
     private func saveCachedFlights(_ flights: [StarshipFlight]) {
         do {

@@ -6,8 +6,8 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     let missionName: String
     let summary: String
     let vehicle: String
-    let status: LaunchStatus
-    let launchDate: Date?
+    var status: LaunchStatus
+    var launchDate: Date?
     let windowStart: Date?
     let windowEnd: Date?
     let launchSite: String
@@ -16,10 +16,24 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     let imageURL: URL?
     let webcastLive: Bool
     let sourceURL: URL?
-    /// Best stream from Launch Library. Upcoming flights only; nil until a stream is listed.
+    /// Best stream from Launch Library. Nil until a stream is listed.
     var webcastURL: URL? = nil
     /// False when Launch Library marks the date or time as a placeholder. Nil means unknown.
     var hasExactTime: Bool? = nil
+    /// Launch Library's sequence for this flight. Nil until one is listed.
+    var publishedMilestones: [FlightMilestone]? = nil
+    /// How far to trust `launchDate`, as Launch Library's abbreviation: "MIN", "M", "Q2", "Y".
+    var netPrecision: String? = nil
+    /// Booster, then ship. Empty until assigned.
+    var vehicles: [FlightVehicle]? = nil
+    /// Editors' notes on this flight, newest first.
+    var updates: [FlightUpdate]? = nil
+    var failureReason: String? = nil
+    /// Every stream Launch Library lists, best first.
+    var streams: [FlightStream]? = nil
+    /// Where the pad is, for the forecast. Nil when Launch Library doesn't say.
+    var padLatitude: Double? = nil
+    var padLongitude: Double? = nil
 
     var isUpcoming: Bool {
         guard let launchDate else { return true }
@@ -27,26 +41,40 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     }
 
     /// Worth a ticking clock: confirmed Go, already flown, or an exact time with a date set.
-    /// Otherwise the date is a placeholder (e.g. "To Be Determined", NET midnight UTC).
+    /// "To Be Confirmed" ticks only with a minute-precise time: SpaceX counts down to that target
+    /// well before Launch Library moves to Go. Otherwise the date is a placeholder
+    /// (e.g. "To Be Determined", NET midnight UTC).
     var hasFirmDate: Bool {
         guard launchDate != nil else { return false }
         if status.isGo || status.confirmsLiftoff { return true }
+        if status.isTBC { return hasExactTime == true }
         return !status.isTBD && hasExactTime != false
     }
 
-    var timeline: [FlightEvent] {
-        guard let launchDate else {
-            return FlightEvent.standardTemplate(relativeTo: nil)
-        }
-        return FlightEvent.standardTemplate(relativeTo: launchDate)
+    var hasPublishedTimeline: Bool {
+        publishedMilestones != nil
     }
 
-    /// Liftoff confirmed by status, or webcast live past NET while still Go. Holds and TBD never count,
+    /// The published sequence when there is one, else the template. Published sequences start at
+    /// propellant load, so the template's earlier watch markers stay in front.
+    var timeline: [FlightEvent] {
+        let template = FlightEvent.standardTemplate(relativeTo: launchDate)
+        guard let milestones = publishedMilestones, let first = milestones.first else { return template }
+        return template.filter { $0.offset < first.offset } + milestones.map { milestone in
+            FlightEvent(
+                title: milestone.title,
+                targetDate: launchDate?.addingTimeInterval(milestone.offset),
+                offset: milestone.offset,
+                phase: milestone.phase
+            )
+        }
+    }
+
+    /// Liftoff confirmed by Launch Library's status or the viewer's own mark (`ManualLiftoff`).
+    /// NET passing proves nothing: Starship often holds in the last minute and the status lags,
     /// so the timeline waits at the last pre-launch event instead of running on the device clock.
     func hasLiftedOff(now: Date) -> Bool {
-        if status.confirmsLiftoff { return true }
-        guard !status.isHoldOrTBD, webcastLive, let launchDate else { return false }
-        return now >= launchDate
+        status.confirmsLiftoff
     }
 
     /// The latest event reached: past its target time and, after T0, only once liftoff is confirmed.
@@ -68,7 +96,8 @@ extension Array where Element == StarshipFlight {
     var nextFlight: StarshipFlight? {
         filter(\.isUpcoming)
             .sorted { ($0.launchDate ?? .distantFuture) < ($1.launchDate ?? .distantFuture) }
-            .first
+            .first?
+            .applyingManualLiftoff()
     }
 }
 
@@ -92,14 +121,20 @@ struct LaunchStatus: Codable, Hashable {
         return value.contains("determined") || value.contains("tbd")
     }
 
+    /// Launch Library: "To Be Confirmed". A target date, but not an official one.
+    var isTBC: Bool {
+        let value = name.lowercased()
+        return value.contains("to be confirmed") || value == "tbc"
+    }
+
     /// Launch Library: "On Hold".
     var isHold: Bool {
         name.lowercased().contains("hold")
     }
 
-    /// Launch Library: "On Hold", "To Be Determined".
+    /// Launch Library: "On Hold", "To Be Determined", "To Be Confirmed".
     var isHoldOrTBD: Bool {
-        isTBD || isHold
+        isTBD || isTBC || isHold
     }
 
     /// Launch Library: "Launch Successful". "Payload Deployed" also means it worked.
@@ -108,11 +143,59 @@ struct LaunchStatus: Codable, Hashable {
         return value.contains("success") || value.contains("deployed")
     }
 
+    /// The flight is over, one way or the other.
+    var isFinal: Bool {
+        isSuccess || name.lowercased().contains("fail")
+    }
+
     /// Any scrub or failure. Holds stay white.
     var isAlert: Bool {
         let value = name.lowercased()
         return value.contains("fail") || value.contains("scrub") || value.contains("abort")
     }
+}
+
+struct FlightVehicle: Codable, Hashable {
+    /// "Booster 22", "Ship 42".
+    let name: String
+    /// This vehicle's nth flight. Boosters only.
+    let flightNumber: Int?
+    let details: String?
+    let landingSummary: String?
+    /// Nil until a landing attempt has an outcome.
+    let landingSucceeded: Bool?
+    /// "Booster" or "Ship". Nil in caches from older builds.
+    var role: String? = nil
+    /// How and where it is meant to come down: "Tower catch · Starbase". Nil when unlisted.
+    var landingPlan: String? = nil
+}
+
+/// Something on the road to a launch: a static fire, a rollout, a wet dress rehearsal.
+struct CampaignEvent: Identifiable, Codable, Hashable {
+    let id: Int
+    let name: String
+    /// "Static Fire", "Rollout". Nil when Launch Library gives no type.
+    let kind: String?
+    let date: Date
+    let summary: String?
+}
+
+struct FlightStream: Codable, Hashable {
+    /// "SpaceX", "NASASpaceflight", or the site when no publisher is listed.
+    let name: String
+    let url: URL
+}
+
+struct FlightUpdate: Codable, Hashable {
+    let date: Date
+    let text: String
+}
+
+struct FlightMilestone: Codable, Hashable {
+    let title: String
+    /// Seconds from liftoff.
+    let offset: TimeInterval
+    let phase: FlightPhase
 }
 
 struct FlightEvent: Identifiable, Codable, Hashable {
@@ -144,9 +227,12 @@ struct FlightEvent: Identifiable, Codable, Hashable {
             (-30, "Go for launch", .preflight),
             (0, "Liftoff", .ascent),
             (45, "Max Q", .ascent),
+            (2 * 60 + 22, "Booster engine cutoff", .ascent),
             (2 * 60 + 24, "Hot staging", .ascent),
             (2 * 60 + 30, "Boostback burn", .booster),
             (6 * 60 + 34, "Booster landing burn", .booster),
+            // Catch or splashdown, so the booster lane ends on its outcome rather than a burn starting.
+            (6 * 60 + 54, "Booster landing", .booster),
             (8 * 60 + 11, "Ship engine cutoff", .ship),
             (47 * 60 + 47, "Ship reentry", .ship),
             (65 * 60 + 8, "Landing flip", .ship),

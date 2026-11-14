@@ -25,8 +25,10 @@ struct FlightsView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    FlightSection(title: "Upcoming", flights: repository.flights.filter(\.isUpcoming), usesUTC: usesUTC)
-                    FlightSection(title: "Previous", flights: repository.pastFlights, usesUTC: usesUTC, showsYear: true)
+                    ProgrammeStatsView(stats: ProgrammeStats(flights: repository.flights))
+                        .padding(.top, 24)
+                    FlightSection(title: "Upcoming", flights: repository.flights.filter(\.isUpcoming), allFlights: repository.flights, usesUTC: usesUTC)
+                    FlightSection(title: "Previous", flights: repository.pastFlights, allFlights: repository.flights, usesUTC: usesUTC, showsYear: true)
                 }
                 .padding(.horizontal, Theme.gutter)
                 .padding(.bottom, 24)
@@ -41,6 +43,7 @@ struct FlightsView: View {
 private struct FlightSection: View {
     let title: String
     let flights: [StarshipFlight]
+    let allFlights: [StarshipFlight]
     let usesUTC: Bool
     var showsYear = false
 
@@ -53,7 +56,7 @@ private struct FlightSection: View {
 
             ForEach(flights) { flight in
                 NavigationLink {
-                    FlightDetailView(flight: flight, usesUTC: usesUTC)
+                    FlightDetailView(flight: flight, allFlights: allFlights, usesUTC: usesUTC)
                 } label: {
                     FlightRow(flight: flight, usesUTC: usesUTC, showsYear: showsYear)
                 }
@@ -76,9 +79,13 @@ private struct FlightRow: View {
                     .multilineTextAlignment(.leading)
                 Text(flight.dateText(usesUTC: usesUTC, year: showsYear))
                     .caps(.caption2, color: Theme.secondary, tracking: 1)
+                if let vehicles = flight.vehicles, !vehicles.isEmpty {
+                    Text(vehicles.map(\.name).joined(separator: " · "))
+                        .caps(.caption2, color: Theme.tertiary, tracking: 1)
+                }
             }
             Spacer(minLength: 0)
-            Text(flight.status.name)
+            Text(flight.status.shortName)
                 .caps(.caption2, color: flight.status.isAlert ? Theme.alert : Theme.secondary, tracking: 1)
         }
         .padding(.vertical, 14)
@@ -91,11 +98,32 @@ private struct FlightRow: View {
 
 private struct FlightDetailView: View {
     let flight: StarshipFlight
+    let allFlights: [StarshipFlight]
     let usesUTC: Bool
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                if let imageURL = flight.imageURL {
+                    // Clear until it loads, so a missing photo leaves no grey box.
+                    Color.clear
+                        .frame(height: 210)
+                        .overlay {
+                            AsyncImage(url: imageURL) { phase in
+                                if let image = phase.image {
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                }
+                            }
+                        }
+                        .clipped()
+                        .padding(.horizontal, -Theme.gutter)
+                        .accessibilityHidden(true)
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text(flight.shortName)
                         .caps(.title2.weight(.light), tracking: 3)
@@ -114,6 +142,13 @@ private struct FlightDetailView: View {
                     .font(.body.weight(.light))
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if let webcastURL = flight.webcastURL {
+                    Button(flight.isUpcoming ? "Webcast" : "Watch replay") { openURL(webcastURL) }
+                        .buttonStyle(OutlineButtonStyle())
+                }
+
+                FlightFacts(flight: flight, usesUTC: usesUTC, allFlights: allFlights)
             }
             .padding(Theme.gutter)
             .frame(maxWidth: .infinity, alignment: .leading)

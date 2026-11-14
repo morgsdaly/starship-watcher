@@ -24,8 +24,8 @@ struct LaunchLibraryClient {
 
     /// One request for upcoming, plus one for previous when `includePrevious` is set.
     func fetchStarshipFlights(includePrevious: Bool = true) async throws -> [StarshipFlight] {
-        async let upcoming = fetch(path: "launch/upcoming/", ordering: "net", detailed: true)
-        async let previous = includePrevious ? fetch(path: "launch/previous/", ordering: "-net") : []
+        async let upcoming = fetch(path: "launches/upcoming/", ordering: "net")
+        async let previous = includePrevious ? fetch(path: "launches/previous/", ordering: "-net") : []
         let combined = try await upcoming + previous
 
         return combined
@@ -48,19 +48,42 @@ struct LaunchLibraryClient {
             }
     }
 
-    /// `detailed` adds `vidURLs`, which the default list mode omits.
-    private func fetch(path: String, ordering: String, detailed: Bool = false) async throws -> [LaunchLibraryLaunch] {
-        var components = URLComponents(string: "https://ll.thespacedevs.com/2.0.0/\(path)")!
-        components.queryItems = [
+    /// Upcoming static fires, rollouts and other tests, soonest first. One request.
+    func fetchCampaignEvents() async throws -> [CampaignEvent] {
+        let response: LaunchLibraryEventResponse = try await get(path: "events/upcoming/", query: [
+            URLQueryItem(name: "search", value: "Starship"),
+            URLQueryItem(name: "limit", value: "10")
+        ])
+        return response.results
+            .compactMap { item -> CampaignEvent? in
+                guard let event = item.value, let date = event.date?.value, let name = event.name.nilIfEmpty else { return nil }
+                return CampaignEvent(
+                    id: event.id,
+                    name: name,
+                    kind: event.type?.value?.name?.nilIfEmpty,
+                    date: date,
+                    summary: event.description?.value?.cleanedLaunchText.nilIfEmpty
+                )
+            }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Detailed mode adds streams, timeline, vehicles and updates, which the default normal mode omits.
+    private func fetch(path: String, ordering: String) async throws -> [LaunchLibraryLaunch] {
+        let response: LaunchLibraryResponse = try await get(path: path, query: [
             URLQueryItem(name: "search", value: "Starship"),
             URLQueryItem(name: "limit", value: "20"),
-            URLQueryItem(name: "ordering", value: ordering)
-        ]
-        if detailed {
-            components.queryItems?.append(URLQueryItem(name: "mode", value: "detailed"))
-        }
+            URLQueryItem(name: "ordering", value: ordering),
+            URLQueryItem(name: "mode", value: "detailed")
+        ])
+        return response.results
+    }
 
-        guard let url = components.url else { return [] }
+    private func get<Response: Decodable>(path: String, query: [URLQueryItem]) async throws -> Response {
+        var components = URLComponents(string: "https://ll.thespacedevs.com/2.3.0/\(path)")!
+        components.queryItems = query
+
+        guard let url = components.url else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.setValue("Starship Watcher iOS", forHTTPHeaderField: "User-Agent")
 
@@ -75,7 +98,7 @@ struct LaunchLibraryClient {
         guard 200..<300 ~= httpResponse.statusCode else {
             throw URLError(.badServerResponse)
         }
-        return try decoder.decode(LaunchLibraryResponse.self, from: data).results
+        return try decoder.decode(Response.self, from: data)
     }
 }
 
@@ -93,18 +116,163 @@ private extension StarshipFlight {
         self.launchSite = response.pad?.location.name ?? "Starbase, Texas"
         self.padName = response.pad?.name ?? "Launch Pad"
         self.probability = response.probability
-        self.imageURL = response.image
+        self.imageURL = response.image?.imageURL
         self.webcastLive = response.webcastLive ?? false
         self.sourceURL = response.url
-        self.webcastURL = response.vidURLs?.min { ($0.priority ?? .max) < ($1.priority ?? .max) }?.url
-        if let tbdDate = response.tbdDate, let tbdTime = response.tbdTime {
-            self.hasExactTime = !tbdDate && !tbdTime
+        let videos = (response.vidURLs ?? []).sorted { ($0.priority ?? .max) < ($1.priority ?? .max) }
+        self.webcastURL = videos.first?.url
+        self.streams = videos.map { FlightStream(name: $0.publisher?.nilIfEmpty ?? $0.url.host() ?? "Stream", url: $0.url) }
+        self.netPrecision = response.netPrecision?.abbrev
+        self.hasExactTime = response.netPrecision?.abbrev.map { ["SEC", "MIN"].contains($0) }
+        self.publishedMilestones = response.timeline?.milestones
+        self.vehicles = [
+            response.rocket?.launcherStage?.first?.vehicle,
+            response.rocket?.spacecraftStage?.first?.vehicle
+        ].compactMap { $0 }
+        self.updates = response.updates?.latest
+        self.failureReason = response.failReason?.cleanedLaunchText.nilIfEmpty
+        self.padLatitude = response.pad?.latitude?.value?.value
+        self.padLongitude = response.pad?.longitude?.value?.value
+    }
+}
+
+private extension Array where Element == LaunchLibraryUpdate {
+    /// Newest first, capped at what the screens show so the shared cache stays small.
+    var latest: [FlightUpdate] {
+        compactMap { update -> FlightUpdate? in
+            guard let date = update.createdOn, let text = update.comment?.cleanedLaunchText.nilIfEmpty else { return nil }
+            return FlightUpdate(date: date, text: text)
         }
+        .sorted { $0.date > $1.date }
+        .prefix(5)
+        .map { $0 }
+    }
+}
+
+private extension LaunchLibraryLauncherStage {
+    var vehicle: FlightVehicle? {
+        guard let launcher, launcher.isPlaceholder != true, let name = launcher.serialNumber?.nilIfEmpty else { return nil }
+        return FlightVehicle(
+            name: name,
+            flightNumber: launcherFlightNumber,
+            details: launcher.details?.cleanedLaunchText.nilIfEmpty,
+            landingSummary: landing?.description?.cleanedLaunchText.nilIfEmpty,
+            landingSucceeded: landing?.outcome,
+            role: "Booster",
+            landingPlan: landing?.plan
+        )
+    }
+}
+
+private extension LaunchLibrarySpacecraftStage {
+    var vehicle: FlightVehicle? {
+        guard let spacecraft, spacecraft.isPlaceholder != true, let name = spacecraft.name?.nilIfEmpty else { return nil }
+        return FlightVehicle(
+            name: name,
+            flightNumber: nil,
+            details: spacecraft.description?.cleanedLaunchText.nilIfEmpty,
+            landingSummary: landing?.description?.cleanedLaunchText.nilIfEmpty,
+            landingSucceeded: landing?.outcome,
+            role: "Ship",
+            landingPlan: landing?.plan
+        )
+    }
+}
+
+private extension LaunchLibraryLanding {
+    /// "Return to Launch Site · Starbase". Nil when no landing is planned or nothing is listed.
+    var plan: String? {
+        guard attempt != false else { return nil }
+        let parts = [type?.value?.name, landingLocation?.value?.name].compactMap { $0?.nilIfEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Nil when no landing was attempted or it hasn't happened yet.
+    var outcome: Bool? {
+        attempt == true ? success : nil
+    }
+}
+
+private extension Array where Element == LaunchLibraryTimelineEvent {
+    /// Nil without a staging event or with an empty phase: progress divides by each phase's count.
+    var milestones: [FlightMilestone]? {
+        let parsed = compactMap { event -> (title: String, offset: TimeInterval)? in
+            guard let title = event.type?.abbrev, let offset = event.relativeTime?.durationSeconds else { return nil }
+            return (title, offset)
+        }.sorted { $0.offset < $1.offset }
+
+        let isStaging = { (title: String) in title.lowercased().contains("separation") || title.lowercased().contains("staging") }
+        guard let staging = parsed.first(where: { isStaging($0.title) })?.offset else { return nil }
+
+        let milestones = parsed.map { title, offset -> FlightMilestone in
+            let name = title.lowercased()
+            let mentions = { (words: [String]) in words.contains { name.contains($0) } }
+            let phase: FlightPhase
+            if offset < 0 {
+                phase = .preflight
+            } else if offset <= staging, !mentions(["boostback"]) {
+                phase = .ascent
+            } else if mentions(["booster", "super heavy", "stage 1", "first stage", "boostback", "jettison"]) {
+                phase = .booster
+            } else if mentions(["ship", "stage 2", "second stage", "seco", "payload", "entry"]) {
+                phase = .ship
+            } else if mentions(["landing", "catch"]) {
+                // Unnamed landings: the booster is down within about five minutes of staging.
+                phase = offset <= staging + 6 * 60 ? .booster : .ship
+            } else {
+                phase = .ship
+            }
+            return FlightMilestone(title: title, offset: offset, phase: phase)
+        }
+        return FlightPhase.allCases.allSatisfy { phase in milestones.contains { $0.phase == phase } } ? milestones : nil
     }
 }
 
 private struct LaunchLibraryResponse: Decodable {
     let results: [LaunchLibraryLaunch]
+}
+
+/// Decodes to nil instead of throwing. For fields whose shape hasn't been checked against the
+/// live API: a surprise there must not fail the whole launch list.
+private struct Lenient<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        // Through a container, so dates still use the decoder's date strategy.
+        value = try? decoder.singleValueContainer().decode(Value.self)
+    }
+}
+
+/// A number that may arrive as a string, as Launch Library's coordinates have across versions.
+private struct FlexibleDouble: Decodable {
+    let value: Double
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let number = try? container.decode(Double.self) {
+            value = number
+        } else if let text = try? container.decode(String.self), let number = Double(text) {
+            value = number
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Not a number")
+        }
+    }
+}
+
+private struct LaunchLibraryNamed: Decodable {
+    let name: String?
+}
+
+private struct LaunchLibraryEventResponse: Decodable {
+    let results: [Lenient<LaunchLibraryEvent>]
+}
+
+private struct LaunchLibraryEvent: Decodable {
+    let id: Int
+    let name: String
+    let date: Lenient<Date>?
+    let type: Lenient<LaunchLibraryNamed>?
+    let description: Lenient<String>?
 }
 
 private struct LaunchLibraryLaunch: Decodable {
@@ -113,6 +281,7 @@ private struct LaunchLibraryLaunch: Decodable {
     let name: String
     let status: LaunchLibraryStatus
     let net: Date?
+    let netPrecision: LaunchLibraryPrecision?
     let windowStart: Date?
     let windowEnd: Date?
     let probability: Int?
@@ -120,10 +289,11 @@ private struct LaunchLibraryLaunch: Decodable {
     let mission: LaunchLibraryMission?
     let pad: LaunchLibraryPad?
     let webcastLive: Bool?
-    let image: URL?
-    let tbdDate: Bool?
-    let tbdTime: Bool?
+    let image: LaunchLibraryImage?
     let vidURLs: [LaunchLibraryVideo]?
+    let timeline: [LaunchLibraryTimelineEvent]?
+    let updates: [LaunchLibraryUpdate]?
+    let failReason: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -131,6 +301,7 @@ private struct LaunchLibraryLaunch: Decodable {
         case name
         case status
         case net
+        case netPrecision = "net_precision"
         case windowStart = "window_start"
         case windowEnd = "window_end"
         case probability
@@ -139,15 +310,67 @@ private struct LaunchLibraryLaunch: Decodable {
         case pad
         case webcastLive = "webcast_live"
         case image
-        case tbdDate = "tbddate"
-        case tbdTime = "tbdtime"
-        case vidURLs
+        case vidURLs = "vid_urls"
+        case timeline
+        case updates
+        case failReason = "failreason"
     }
+}
+
+/// `abbrev`: SEC, MIN, HR, AM, PM, DAY, WK, M, Q1-Q4, H1, H2, Y, FY, DEC.
+private struct LaunchLibraryPrecision: Decodable {
+    let abbrev: String?
+}
+
+private struct LaunchLibraryUpdate: Decodable {
+    let comment: String?
+    let createdOn: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case comment
+        case createdOn = "created_on"
+    }
+}
+
+private struct LaunchLibraryImage: Decodable {
+    let imageURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case imageURL = "image_url"
+    }
+}
+
+/// Optional fields so one malformed event can't fail the whole launch list.
+private struct LaunchLibraryTimelineEvent: Decodable {
+    let type: LaunchLibraryTimelineEventType?
+    let relativeTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case relativeTime = "relative_time"
+    }
+}
+
+private struct LaunchLibraryTimelineEventType: Decodable {
+    let abbrev: String?
 }
 
 private struct LaunchLibraryVideo: Decodable {
     let url: URL
     let priority: Int?
+    let publisher: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url, priority, publisher
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decode(URL.self, forKey: .url)
+        priority = try container.decodeIfPresent(Int.self, forKey: .priority)
+        // Lenient: a publisher in an unexpected shape must not fail the whole launch list.
+        publisher = (try? container.decodeIfPresent(String.self, forKey: .publisher)) ?? nil
+    }
 }
 
 private struct LaunchLibraryStatus: Decodable {
@@ -156,6 +379,68 @@ private struct LaunchLibraryStatus: Decodable {
 
 private struct LaunchLibraryRocket: Decodable {
     let configuration: LaunchLibraryRocketConfiguration
+    let launcherStage: [LaunchLibraryLauncherStage]?
+    let spacecraftStage: [LaunchLibrarySpacecraftStage]?
+
+    enum CodingKeys: String, CodingKey {
+        case configuration
+        case launcherStage = "launcher_stage"
+        case spacecraftStage = "spacecraft_stage"
+    }
+}
+
+private struct LaunchLibraryLauncherStage: Decodable {
+    let launcherFlightNumber: Int?
+    let launcher: LaunchLibraryLauncher?
+    let landing: LaunchLibraryLanding?
+
+    enum CodingKeys: String, CodingKey {
+        case launcherFlightNumber = "launcher_flight_number"
+        case launcher
+        case landing
+    }
+}
+
+private struct LaunchLibraryLauncher: Decodable {
+    let serialNumber: String?
+    let details: String?
+    let isPlaceholder: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case serialNumber = "serial_number"
+        case details
+        case isPlaceholder = "is_placeholder"
+    }
+}
+
+private struct LaunchLibrarySpacecraftStage: Decodable {
+    let spacecraft: LaunchLibrarySpacecraft?
+    let landing: LaunchLibraryLanding?
+}
+
+private struct LaunchLibrarySpacecraft: Decodable {
+    let name: String?
+    let description: String?
+    let isPlaceholder: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case isPlaceholder = "is_placeholder"
+    }
+}
+
+private struct LaunchLibraryLanding: Decodable {
+    let attempt: Bool?
+    let success: Bool?
+    let description: String?
+    let type: Lenient<LaunchLibraryNamed>?
+    let landingLocation: Lenient<LaunchLibraryNamed>?
+
+    enum CodingKeys: String, CodingKey {
+        case attempt, success, description, type
+        case landingLocation = "landing_location"
+    }
 }
 
 private struct LaunchLibraryRocketConfiguration: Decodable {
@@ -176,6 +461,8 @@ private struct LaunchLibraryMission: Decodable {
 private struct LaunchLibraryPad: Decodable {
     let name: String
     let location: LaunchLibraryLocation
+    let latitude: Lenient<FlexibleDouble>?
+    let longitude: Lenient<FlexibleDouble>?
 }
 
 private struct LaunchLibraryLocation: Decodable {
@@ -201,5 +488,41 @@ private extension String {
         replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\n\n", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+
+    /// Seconds in an ISO 8601 duration: "-PT35M33S", "PT1H17M40S", "P0D". Nil if malformed.
+    var durationSeconds: TimeInterval? {
+        var rest = Substring(self)
+        let sign: TimeInterval = rest.first == "-" ? -1 : 1
+        if rest.first == "-" || rest.first == "+" { rest = rest.dropFirst() }
+        guard rest.first == "P" else { return nil }
+
+        var total: TimeInterval = 0
+        var number = ""
+        var inTime = false
+        for character in rest.dropFirst() {
+            if character == "T" {
+                inTime = true
+            } else if character.isNumber || character == "." {
+                number.append(character)
+            } else {
+                let unit: TimeInterval
+                switch (character, inTime) {
+                case ("D", false): unit = 86_400
+                case ("H", true): unit = 3_600
+                case ("M", true): unit = 60
+                case ("S", true): unit = 1
+                default: return nil
+                }
+                guard let value = TimeInterval(number) else { return nil }
+                total += value * unit
+                number = ""
+            }
+        }
+        return number.isEmpty ? sign * total : nil
     }
 }

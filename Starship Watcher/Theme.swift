@@ -24,11 +24,27 @@ extension View {
 }
 
 extension LaunchStatus {
+    /// Pre-launch statuses only. The rest speak for themselves.
+    var explainer: Explainer? {
+        let value = name.lowercased()
+        return if isTBD {
+            Explainer(title: "To Be Determined", message: "No launch date is set yet. The date shown is a placeholder.")
+        } else if value.contains("confirmed") || value.contains("tbc") {
+            Explainer(title: "To Be Confirmed", message: "There's a target date, but it isn't official yet.")
+        } else if isHold {
+            Explainer(title: "On Hold", message: "The countdown is paused. A new time depends on what caused the hold.")
+        } else if isGo {
+            Explainer(title: "Go for Launch", message: "The launch time is confirmed.")
+        } else {
+            nil
+        }
+    }
+
     var displayName: String {
         switch name.lowercased() {
-        case "go": "Go for launch"
-        case "tbd": "To be determined"
-        case "tbc": "To be confirmed"
+        case "go", "go for launch": "Go for launch"
+        case "tbd", "to be determined": "To be determined"
+        case "tbc", "to be confirmed": "To be confirmed"
         default: name
         }
     }
@@ -37,6 +53,7 @@ extension LaunchStatus {
     var shortName: String {
         let value = name.lowercased()
         if isSuccess { return "Success" }
+        if value.contains("partial") { return "Partial failure" }
         if isAlert { return value.contains("scrub") ? "Scrub" : "Failure" }
         if isHold { return "Hold" }
         if isTBD { return "TBD" }
@@ -58,9 +75,11 @@ enum Countdown {
     /// afterwards so an in-flight mission never freezes at zero.
     static func text(to target: Date?, now: Date, compact: Bool = false) -> String {
         guard let target else { return "TBD" }
-        let interval = target.timeIntervalSince(now)
-        let sign = interval >= 0 ? "T-" : "T+"
-        let remaining = abs(Int(interval))
+        // Nearest second: with ticks aligned to the target (`tickAnchor`) every value shows for
+        // exactly one second, where truncating held 00:00:00 for two.
+        let rounded = Int(target.timeIntervalSince(now).rounded())
+        let sign = rounded > 0 ? "T-" : "T+"
+        let remaining = abs(rounded)
         let days = remaining / 86_400
         let hours = remaining / 3_600 % 24
         let minutes = remaining / 60 % 60
@@ -74,9 +93,17 @@ enum Countdown {
         return String(format: "%@%02d:%02d:%02d", sign, hours, minutes, seconds)
     }
 
+    /// Start date for a once-a-second schedule whose ticks land on whole seconds of `target`,
+    /// so the clock changes at the same instant as the webcast's rather than up to a second late.
+    static func tickAnchor(for target: Date?, now: Date = .now) -> Date {
+        guard let target else { return now }
+        let offset = target.timeIntervalSince(now)
+        return now.addingTimeInterval(offset - offset.rounded(.up) - 1)
+    }
+
     /// "04:12" or "2:04:12" under a day out. Nil once passed or further away.
     static func remaining(to target: Date, now: Date) -> String? {
-        let total = Int(target.timeIntervalSince(now))
+        let total = Int(target.timeIntervalSince(now).rounded())
         guard total >= 0, total < 86_400 else { return nil }
         return total < 3_600
             ? String(format: "%02d:%02d", total / 60, total % 60)
