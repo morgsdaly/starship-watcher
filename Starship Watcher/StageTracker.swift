@@ -18,10 +18,12 @@ struct StageTracker: View {
                 Text("Planned times").caps(.caption2, color: Theme.tertiary, tracking: 1.5)
             }
 
-            Text(progress.title)
-                .caps(.title3.weight(.light), color: progress.isAlert ? Theme.alert : .white, tracking: 3)
-                .contentTransition(.opacity)
-                .animation(.easeInOut(duration: 0.4), value: progress.title)
+            if let title = progress.title {
+                Text(title)
+                    .caps(.title3.weight(.light), color: progress.isAlert ? Theme.alert : .white, tracking: 3)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.4), value: title)
+            }
 
             PhaseRail(progress: progress, showsLabels: !typeSize.isAccessibilitySize)
 
@@ -42,7 +44,7 @@ struct StageTracker: View {
         // One tap on the wrist per event. Nothing for refreshes.
         .sensoryFeedback(.impact(weight: .medium), trigger: progress.title)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Estimated stage: \(progress.title)")
+        .accessibilityLabel("Estimated stage: \(progress.title ?? "Awaiting liftoff")")
         .accessibilityValue(progress.upcoming.map { "Next: \($0.title)" }.joined(separator: ". "))
     }
 }

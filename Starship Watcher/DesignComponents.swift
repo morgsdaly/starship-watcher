@@ -86,6 +86,7 @@ extension View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(.white)
+                        .dynamicTypeSize(.large)
                 }
             }
         }
