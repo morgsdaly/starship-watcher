@@ -44,7 +44,11 @@ struct LaunchView: View {
                                 }
                             }
                         } label: {
+                            // The tall glyph overfills the glass circle at the toolbar's default
+                            // large scale, and more so with large text, which the circle ignores.
                             Image(systemName: "square.and.arrow.up")
+                                .imageScale(.medium)
+                                .dynamicTypeSize(.large)
                         }
                         .accessibilityLabel("Share flight")
                     }
@@ -105,7 +109,6 @@ private struct LaunchHero: View {
     let repository: FlightRepository
     let usesUTC: Bool
 
-    @Environment(\.openURL) private var openURL
     @ScaledMetric(relativeTo: .largeTitle) private var clockSize: CGFloat = 46
 
     var body: some View {
@@ -162,21 +165,8 @@ private struct LaunchHero: View {
                 LiftoffMark(flight: flight, repository: repository, now: now)
 
                 if let streamURL = flight.liveStreamURL(now: now) {
-                    HStack(spacing: 20) {
-                        Button("Watch Live") { openURL(streamURL) }
-                            .buttonStyle(OutlineButtonStyle())
-                        let others = flight.otherStreams(now: now)
-                        if !others.isEmpty {
-                            Menu {
-                                ForEach(others, id: \.self) { stream in
-                                    Button(stream.name) { openURL(stream.url) }
-                                }
-                            } label: {
-                                Text("Other streams").caps(.caption, color: Theme.secondary, tracking: 1.5)
-                            }
-                        }
-                    }
-                    .padding(.top, 6)
+                    StreamButtons(streamURL: streamURL, others: flight.otherStreams(now: now))
+                        .padding(.top, 6)
                 }
             }
             .onChange(of: flight.keepsScreenAwake(now: now), initial: true) { _, keepsAwake in
@@ -184,19 +174,87 @@ private struct LaunchHero: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Lifts the text off bright patches the scrim leaves.
+        .shadow(color: .black.opacity(0.5), radius: 6)
         .padding(.horizontal, Theme.gutter)
         .padding(.bottom, 28)
+        // Darkens the photo behind the text, however tall the hero grows near launch.
+        .background {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.55), location: 0.2),
+                    .init(color: .black.opacity(Self.scrimBottom), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -120)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         // The moment itself, whether Launch Library or the viewer called it.
         .sensoryFeedback(.success, trigger: flight.status.confirmsLiftoff)
         .accessibilityElement(children: .contain)
     }
 
+    /// The details below pick the fade up from here, so there's no light band between them.
+    static let scrimBottom = 0.8
+
     private func clockText(now: Date) -> String {
         switch flight.clock(now: now) {
         case .net(let text): text
         case .awaitingLiftoff: "Awaiting liftoff"
         case .countdown(let date), .elapsed(let date): Countdown.text(to: date, now: now)
+        }
+    }
+}
+
+/// Liquid Glass pair: white-tinted glass for the main stream, clear glass for the rest.
+private struct StreamButtons: View {
+    let streamURL: URL
+    let others: [FlightStream]
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Button { openURL(streamURL) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill")
+                        Text("Watch live")
+                    }
+                    .caps(.footnote.weight(.semibold), color: .black, tracking: 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.vertical, 16)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(.white).interactive(), in: .capsule)
+
+                if !others.isEmpty {
+                    Menu {
+                        ForEach(others, id: \.self) { stream in
+                            Button(stream.name) { openURL(stream.url) }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxHeight: .infinity)
+                            .padding(.horizontal, 18)
+                            .contentShape(.capsule)
+                    }
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .accessibilityLabel("Other streams")
+                }
+            }
+            // Both take the height of the taller one.
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -216,6 +274,7 @@ private struct LiftoffMark: View {
                 Text("Tap as it leaves the pad to start the mission clock.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 6)
         } else if flight.hasManualLiftoff {
@@ -281,7 +340,7 @@ private struct LaunchDetails: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Fades the fixed photo out as the details scroll up over it.
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.black.opacity(LaunchHero.scrimBottom), .black], startPoint: .top, endPoint: .bottom)
                 .frame(height: 120)
 
             VStack(alignment: .leading, spacing: 36) {
