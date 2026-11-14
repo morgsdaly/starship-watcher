@@ -35,9 +35,19 @@ struct StarshipFlight: Identifiable, Codable, Hashable {
     var padLatitude: Double? = nil
     var padLongitude: Double? = nil
 
+    /// Still the current flight: not long past NET, or still flying. A ship catch can be a day out.
     var isUpcoming: Bool {
         guard let launchDate else { return true }
-        return launchDate >= .now.addingTimeInterval(-6 * 60 * 60)
+        let now = Date.now
+        return launchDate >= now.addingTimeInterval(-6 * 60 * 60) || isFlying(now: now)
+    }
+
+    /// Lifted off, no result yet, and not long past the last planned event. Launch Library only
+    /// gives a result once the whole flight is over, which can be T+22h for a ship catch.
+    func isFlying(now: Date) -> Bool {
+        guard hasLiftedOff(now: now), !status.isFinal, let launchDate else { return false }
+        let lastEvent = timeline.compactMap(\.targetDate).max() ?? launchDate
+        return now <= max(lastEvent, launchDate).addingTimeInterval(2 * 60 * 60)
     }
 
     /// Worth a ticking clock: confirmed Go, already flown, or an exact time with a date set.
@@ -104,10 +114,17 @@ extension Array where Element == StarshipFlight {
 struct LaunchStatus: Codable, Hashable {
     let name: String
 
-    /// Launch Library: "Launch in Flight", "Launch Successful", "Launch Failure", "Launch was a Partial Failure".
+    /// Launch Library: "Launch in Flight", "Payload Deployed", "Launch Successful", "Launch Failure",
+    /// "Launch was a Partial Failure".
     var confirmsLiftoff: Bool {
+        isInFlight || isFinal
+    }
+
+    /// Launch Library: "Launch in Flight", or "Payload Deployed": payload out, but the flight
+    /// goes on (a ship catch can follow a day later).
+    var isInFlight: Bool {
         let value = name.lowercased()
-        return value.contains("flight") || value.contains("progress") || value.contains("success") || value.contains("fail")
+        return value.contains("flight") || value.contains("progress") || value.contains("deployed")
     }
 
     /// Launch Library: "Go for Launch".
@@ -137,10 +154,9 @@ struct LaunchStatus: Codable, Hashable {
         isTBD || isTBC || isHold
     }
 
-    /// Launch Library: "Launch Successful". "Payload Deployed" also means it worked.
+    /// Launch Library: "Launch Successful". Not "Payload Deployed", which comes mid-flight.
     var isSuccess: Bool {
-        let value = name.lowercased()
-        return value.contains("success") || value.contains("deployed")
+        name.lowercased().contains("success")
     }
 
     /// The flight is over, one way or the other.

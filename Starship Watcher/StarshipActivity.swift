@@ -287,7 +287,7 @@ private enum StatusKind {
         let value = status.lowercased()
         self = if value.contains("success") { .success }
         else if value.contains("fail") { .failure }
-        else if value.contains("flight") || value.contains("progress") { .inFlight }
+        else if LaunchStatus(name: status).isInFlight { .inFlight }
         else if value.contains("hold") { .hold }
         else if value.contains("determined") || value.contains("tbd") { .tbd }
         else if value.contains("confirmed") || value.contains("tbc") { .tbc }

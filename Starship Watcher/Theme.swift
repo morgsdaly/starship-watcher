@@ -58,7 +58,7 @@ extension LaunchStatus {
         if isHold { return "Hold" }
         if isTBD { return "TBD" }
         if value.contains("confirmed") || value.contains("tbc") { return "TBC" }
-        if value.contains("flight") || value.contains("progress") { return "In flight" }
+        if isInFlight { return "In flight" }
         if isGo { return "Go" }
         return name
     }

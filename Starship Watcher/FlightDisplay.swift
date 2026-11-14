@@ -29,9 +29,11 @@ extension StarshipFlight {
         return String(name[range.upperBound...])
     }
 
-    /// T-3h to T+2h around a firm NET: when Launch polls and a stream may be called live.
+    /// T-3h to T+2h around a firm NET, or longer while still flying: when Launch polls and a
+    /// stream may be called live.
     func isInActiveWindow(now: Date = .now) -> Bool {
         guard hasFirmDate, let launchDate else { return false }
+        if isFlying(now: now) { return true }
         return now >= launchDate.addingTimeInterval(-3 * 60 * 60) && now <= launchDate.addingTimeInterval(2 * 60 * 60)
     }
 
@@ -41,7 +43,8 @@ extension StarshipFlight {
     func pollInterval(now: Date = .now) -> TimeInterval? {
         guard isInActiveWindow(now: now), let launchDate else { return nil }
         if status.isFinal { return 15 * 60 }
-        if status.confirmsLiftoff { return 5 * 60 }
+        // A long coast to a catch would drain the budget at 5m; only the result is left to learn.
+        if status.confirmsLiftoff { return now.timeIntervalSince(launchDate) > 2 * 60 * 60 ? 15 * 60 : 5 * 60 }
         let sinceNET = now.timeIntervalSince(launchDate)
         if sinceNET >= -Self.burstLead, sinceNET <= 6 * 60 { return 60 }
         return abs(sinceNET) <= 60 * 60 ? 12 * 60 : 6 * 60
