@@ -149,8 +149,8 @@ private struct CompactStatus: View {
         } else {
             // No glow here: the island's edge clips it into a smudge.
             StarshipMark(color: status.markColor, glows: false)
-                .frame(height: 20)
-                .padding(.leading, 6)
+                .frame(height: 18)
+                .padding(.leading, 8)
         }
     }
 }
