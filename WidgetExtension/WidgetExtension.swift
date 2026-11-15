@@ -197,8 +197,10 @@ private struct WidgetStage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(progress.title)
-                .caps(.footnote, color: progress.isAlert ? Theme.alert : .white)
+            if let title = progress.title {
+                Text(title)
+                    .caps(.footnote, color: progress.isAlert ? Theme.alert : .white)
+            }
             ForEach(progress.upcoming) { event in
                 HStack(spacing: 12) {
                     Text(event.offsetText)

@@ -3,8 +3,9 @@ import Foundation
 /// Where a flight is against its planned timeline. Worked out from the clock and Launch Library
 /// status, never telemetry, so screens label it an estimate.
 struct MissionProgress: Equatable {
-    /// "Hot staging", "Awaiting liftoff", "Launch Failure".
-    let title: String
+    /// "Hot staging", "On hold", "Launch Failure". Nil past NET with liftoff unconfirmed:
+    /// every clock already reads "Awaiting liftoff", so a title would only repeat it.
+    let title: String?
     let isAlert: Bool
     /// 0...1 per phase. Phases are equal steps, not time: preflight alone spans a day.
     let fills: [FlightPhase: Double]
@@ -33,7 +34,7 @@ extension StarshipFlight {
             return (phase, steps / Double(inPhase.count))
         })
 
-        func stopped(_ title: String, isAlert: Bool = false) -> MissionProgress {
+        func stopped(_ title: String?, isAlert: Bool = false) -> MissionProgress {
             MissionProgress(title: title, isAlert: isAlert, fills: fills, upcoming: [])
         }
 
@@ -44,7 +45,7 @@ extension StarshipFlight {
         }
         guard hasFirmDate, let launchDate else { return stopped("Awaiting date") }
         if status.isHold { return stopped("On hold") }
-        if launchDate <= now, !hasLiftedOff(now: now) { return stopped("Awaiting liftoff") }
+        if launchDate <= now, !hasLiftedOff(now: now) { return stopped(nil) }
 
         let remaining = events.dropFirst(reached.count)
         let upcoming: [FlightEvent]
