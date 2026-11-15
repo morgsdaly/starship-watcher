@@ -4,51 +4,21 @@ import WidgetKit
 // Shared by the Home Screen widgets and the Live Activity. Everything stays white on black,
 // red only for bad news, but with some depth: the app icon's glowing ship, a horizon, a lit rail.
 
-/// The app icon's Starship V3 upper stage, traced from its 1024 x 1536 artwork.
-struct StarshipSilhouette: Shape {
-    /// Width over height of the traced outline.
-    static let aspectRatio: CGFloat = 350.0 / 1455.0
-
-    func path(in rect: CGRect) -> Path {
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
-        }
-
-        var path = Path()
-        path.move(to: point(0.5, 0))
-        // Ogive nose down to the forward flaps.
-        path.addQuadCurve(to: point(0.706, 0.089), control: point(0.665, 0.028))
-        path.addLine(to: point(1.0, 0.146))
-        path.addLine(to: point(1.0, 0.175))
-        path.addLine(to: point(0.826, 0.175))
-        // Barrel down to the aft flaps.
-        path.addLine(to: point(0.826, 0.728))
-        path.addLine(to: point(0.926, 0.756))
-        path.addLine(to: point(0.926, 1.0))
-        path.addLine(to: point(0.074, 1.0))
-        path.addLine(to: point(0.074, 0.756))
-        path.addLine(to: point(0.174, 0.728))
-        path.addLine(to: point(0.174, 0.175))
-        path.addLine(to: point(0.0, 0.175))
-        path.addLine(to: point(0.0, 0.146))
-        path.addLine(to: point(0.294, 0.089))
-        path.addQuadCurve(to: point(0.5, 0), control: point(0.335, 0.028))
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// The ship with the icon's glow. Size it by height.
+/// The app icon's Starship V3 upper stage, from the icon's own artwork, with a faint halo
+/// like the icon's glass edge. Size it by height.
 struct StarshipMark: View {
     var color: Color = .white
     var glows = true
 
     var body: some View {
-        StarshipSilhouette()
-            .fill(color)
-            .aspectRatio(StarshipSilhouette.aspectRatio, contentMode: .fit)
-            .shadow(color: color.opacity(glows ? 0.6 : 0), radius: 6)
-            .shadow(color: color.opacity(glows ? 0.25 : 0), radius: 16)
+        // Template asset cropped tight to the ship, so it tints and sizes like a shape.
+        Image("StarshipSilhouette")
+            .resizable()
+            .renderingMode(.template)
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .foregroundStyle(color)
+            .shadow(color: color.opacity(glows ? 0.3 : 0), radius: 3)
             .accessibilityHidden(true)
     }
 }
